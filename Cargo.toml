@@ -1,0 +1,4 @@
+[workspace]
+members = ["zenoh-arena", "z_tetris"]
+resolver = "2"
+package.version = "0.1.0"
