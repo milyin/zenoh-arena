@@ -142,14 +142,3 @@ impl<E> NodeState<E> {
         }
     }
 }
-
-/// State update notification
-#[derive(Debug, Clone)]
-pub struct StateUpdate<T> {
-    /// The game state
-    pub state: T,
-    /// Source node that produced this state
-    pub source: NodeId,
-    /// Timestamp of the update
-    pub timestamp: std::time::SystemTime,
-}
