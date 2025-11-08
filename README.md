@@ -18,65 +18,81 @@ A peer-to-peer network framework for simple game applications built on the [Zeno
 
 ### Node States
 
-Each node operates in one of two modes:
+Each node operates in one of three states:
 
-- **Client Mode**: Searches for available hosts, connects, sends actions, receives game state
-- **Host Mode**: Runs the game engine, accepts clients, processes actions, broadcasts state
+1. **Searching for Host** - Looking for available hosts to connect to
+2. **Client** - Connected to a host, sending actions and receiving state
+3. **Host** - Running game engine, accepting clients, broadcasting state
 
-### Node Behavior
+### State Behaviors
 
-**As Client:**
+#### Searching for Host State
 
-- Discovers available hosts via Zenoh query
-- Connects to first responsive host
-- Publishes actions to host
-- Subscribes to state updates from host
-- Monitors host liveliness
-- Reconnects or becomes host if current host disconnects
+When in this state, the node:
 
-**As Host:**
+- Queries the network for available hosts using [Zenoh Queriers](https://docs.rs/zenoh/latest/zenoh/query/struct.Querier.html)
+- Waits for host responses (with configurable timeout and randomized jitter)
+- Evaluates available hosts based on acceptance status and capacity
+- Transitions to **Client** state if a suitable host is found
+- Transitions to **Host** state if no hosts are found and `auto_host` is enabled
 
-- Declares [Queryable](https://docs.rs/zenoh/latest/zenoh/query/struct.Queryable.html) for discovery
-- Accepts or rejects client join requests
-- Subscribes to actions from all clients
-- Processes actions through game engine
-- Publishes state updates to all clients
-- Manages client lifecycle
-- Declares liveliness token
+#### Client State
 
-### Host States
+When in this state, the node:
 
-A host can be:
+- Maintains connection to a specific host
+- Publishes actions to the host via dedicated keyexpr
+- Subscribes to state updates from the host
+- Monitors host liveliness using [liveliness tokens](https://docs.rs/zenoh/latest/zenoh/liveliness/index.html)
+- Processes and displays state updates from the host
+- Transitions to **Searching** state if host disconnects or connection is lost
 
-- **Open**: Accepts new client connections via Queryable API
-- **Closed**: Stops accepting new clients (closes Queryable)
-- **Empty**: No clients currently connected
+#### Host State
 
-### State Transitions
+When in this state, the node:
 
-A host may close and switch back to client mode when:
+- Runs the game engine instance
+- Declares [Queryable](https://docs.rs/zenoh/latest/zenoh/query/struct.Queryable.html) for host discovery (when accepting clients)
+- Accepts or rejects client join requests based on capacity
+- Subscribes to actions from all connected clients via wildcard pattern
+- Processes actions through the game engine
+- Publishes state updates to all connected clients
+- Declares liveliness token for connection monitoring
+- Manages client lifecycle (connections/disconnections)
+- Can be **Open** (accepting new clients) or **Closed** (not accepting new clients)
+- Can be **Empty** (no connected clients) or have connected clients
+- Transitions to **Searching** state when:
+  - Game session ends
+  - Host becomes empty and chooses to search for other hosts
+  - User explicitly requests to stop hosting
 
-- Game session ends
-- Host becomes empty and wants to search for other hosts
-- User explicitly requests shutdown
+### State Transition Rules
 
-**Important**: A node cannot be both host and client simultaneously. It must first close the host (stop accepting clients) before searching for other hosts.
+**Important**: A node can only be in one state at a time. State transitions follow these rules:
+
+- **Searching → Client**: When a host accepts the connection request
+- **Searching → Host**: When no hosts found and node becomes host (if `auto_host` enabled)
+- **Client → Searching**: When host disconnects, connection fails, or user disconnects
+- **Host → Searching**: When host stops (game ends, becomes empty, or user request)
+- **Direct transitions between Client and Host are not allowed** - must go through Searching state
 
 ### Connection Flow
 
-1. **Discovery**: Client queries for available hosts
-2. **Request**: Client sends join request to selected host
-3. **Response**: Host accepts or rejects based on availability
-4. **Confirmation**: Client confirms connection with second targeted query to host's keyexpr
-5. **Connected**: Client begins sending actions and receiving state updates
+1. **Discovery** (Searching state): Node queries for available hosts
+2. **Request** (Searching state): Node sends join request to selected host
+3. **Response**: Host (in Host state) accepts or rejects based on availability
+4. **Confirmation** (Client state): Client confirms connection with targeted query to host's keyexpr
+5. **Connected** (Client state): Client begins sending actions and receiving state updates
 
 ### Failover Behavior
 
 When a client detects that its host has disconnected (via liveliness monitoring):
 
-1. Switches to host-searching mode
+1. Transitions to **Searching** state
 2. Waits for a randomized timeout (prevents thundering herd)
-3. Becomes host if no other hosts are found
+3. Queries for available hosts
+4. Becomes **Host** if no other hosts are found (if `auto_host` enabled)
+5. Otherwise, connects to an available host and becomes **Client**
 
 ## API Layers
 
