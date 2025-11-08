@@ -305,11 +305,11 @@ impl<E: GameEngine> Arena<E> {
     pub async fn set_host_open(&mut self, open: bool) -> Result<(), ArenaError>;
 }
 
-/// Receiver for game state updates
-pub type StateReceiver<T> = tokio::sync::mpsc::Receiver<StateUpdate<T>>;
+/// Receiver for game state updates (using flume, same as zenoh)
+pub type StateReceiver<T> = flume::Receiver<StateUpdate<T>>;
 
-/// Receiver for arena state changes
-pub type ArenaStateReceiver = tokio::sync::mpsc::Receiver<ArenaState>;
+/// Receiver for arena state changes (using flume, same as zenoh)
+pub type ArenaStateReceiver = flume::Receiver<ArenaState>;
 
 #[derive(Debug, Clone)]
 pub struct StateUpdate<T> {
@@ -525,14 +525,17 @@ pub type Result<T> = std::result::Result<T, ArenaError>;
 - All public APIs are async
 
 ### 2. State Management
+
 - Use `Arc<RwLock<T>>` for shared state
-- Use `tokio::sync::mpsc` channels for state updates
+- Use `flume` channels for state updates (same as Zenoh uses internally)
+- `flume` provides better performance and simpler API than `tokio::sync::mpsc`
 
 ### 3. Serialization
 
 - Use Zenoh's native serialization via `zenoh-ext`
 - Action/State types must implement `zenoh_ext::Serialize` and `zenoh_ext::Deserialize`
 - Use `zenoh_ext::z_serialize` and `zenoh_ext::z_deserialize` functions
+```
 
 ### 4. Error Handling
 - Use `thiserror` for error types
@@ -621,6 +624,7 @@ edition = "2021"
 zenoh = "1.6"
 zenoh-ext = "1.6"
 tokio = { version = "1", features = ["full"] }
+flume = "0.11"
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 bs58 = "0.5"
@@ -632,6 +636,7 @@ tracing = "0.1"
 - `zenoh` - Core networking and key expressions
 - `zenoh-ext` - Serialization (Serialize/Deserialize traits, z_serialize/z_deserialize)
 - `tokio` - Async runtime
+- `flume` - Channels for state updates (same as Zenoh uses internally)
 - `thiserror` - Error handling
 - `uuid` - Node ID generation (for base58 encoding)
 - `bs58` - Base58 encoding for keyexpr-safe node IDs
