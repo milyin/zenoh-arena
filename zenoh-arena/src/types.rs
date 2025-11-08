@@ -135,11 +135,11 @@ impl NodeState {
         )
     }
 
-    /// Get number of connected clients (0 if not host)
-    pub fn client_count(&self) -> usize {
+    /// Get number of connected clients (None if not host)
+    pub fn client_count(&self) -> Option<usize> {
         match self {
-            NodeState::Host { connected_clients, .. } => connected_clients.len(),
-            _ => 0,
+            NodeState::Host { connected_clients, .. } => Some(connected_clients.len()),
+            _ => None,
         }
     }
 }

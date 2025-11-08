@@ -1,5 +1,4 @@
-/// Configuration for a Node
-use crate::types::NodeId;
+//! Configuration for a Node
 
 /// Main configuration for a Node
 #[derive(Debug, Clone)]
@@ -86,13 +85,5 @@ impl NodeConfig {
     pub fn with_keyexpr_prefix(mut self, prefix: String) -> Self {
         self.keyexpr_prefix = prefix;
         self
-    }
-
-    /// Get the node ID from config or generate a new one
-    pub fn get_or_generate_node_id(&self) -> crate::error::Result<NodeId> {
-        match &self.node_name {
-            Some(name) => NodeId::from_name(name.clone()),
-            None => Ok(NodeId::generate()),
-        }
     }
 }
