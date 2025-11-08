@@ -44,5 +44,5 @@ pub mod types;
 // Re-exports for convenience
 pub use config::NodeConfig;
 pub use error::{ArenaError, Result};
-pub use node::{GameEngine, Node};
+pub use node::{GameEngine, Node, NodeCommand};
 pub use types::{NodeId, NodeInfo, NodeRole};
