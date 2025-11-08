@@ -165,7 +165,9 @@ impl<E> NodeStateInternal<E> {
     #[allow(dead_code)]
     pub fn client_count(&self) -> Option<usize> {
         match self {
-            NodeStateInternal::Host { connected_clients, .. } => Some(connected_clients.len()),
+            NodeStateInternal::Host {
+                connected_clients, ..
+            } => Some(connected_clients.len()),
             _ => None,
         }
     }
