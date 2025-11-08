@@ -34,7 +34,9 @@ When in this state, the node:
 - Waits for host responses (with configurable timeout and randomized jitter)
 - Evaluates available hosts based on acceptance status and capacity
 - Transitions to **Client** state if a suitable host is found
-- Transitions to **Host** state if no hosts are found and `auto_host` is enabled
+- Transitions to **Host** state if no hosts are found (will wait or fail depending on configuration)
+
+**Note**: This state is skipped entirely if `force_host` is enabled in configuration.
 
 #### Client State
 
@@ -46,6 +48,8 @@ When in this state, the node:
 - Monitors host liveliness using [liveliness tokens](https://docs.rs/zenoh/latest/zenoh/liveliness/index.html)
 - Processes and displays state updates from the host
 - Transitions to **Searching** state if host disconnects or connection is lost
+
+**Note**: This state cannot be entered if `force_host` is enabled in configuration.
 
 #### Host State
 
@@ -61,20 +65,29 @@ When in this state, the node:
 - Manages client lifecycle (connections/disconnections)
 - Can be **Open** (accepting new clients) or **Closed** (not accepting new clients)
 - Can be **Empty** (no connected clients) or have connected clients
-- Transitions to **Searching** state when:
+- Normally transitions to **Searching** state when:
   - Game session ends
   - Host becomes empty and chooses to search for other hosts
   - User explicitly requests to stop hosting
+- If `force_host` is enabled, remains in Host state permanently (cannot transition out)
 
 ### State Transition Rules
 
 **Important**: A node can only be in one state at a time. State transitions follow these rules:
 
+**Normal Mode** (when `force_host` is `false`):
+
 - **Searching → Client**: When a host accepts the connection request
-- **Searching → Host**: When no hosts found and node becomes host (if `auto_host` enabled)
+- **Searching → Host**: When no hosts found and node decides to become host
 - **Client → Searching**: When host disconnects, connection fails, or user disconnects
 - **Host → Searching**: When host stops (game ends, becomes empty, or user request)
 - **Direct transitions between Client and Host are not allowed** - must go through Searching state
+
+**Force Host Mode** (when `force_host` is `true`):
+
+- Node starts directly in **Host** state
+- **No transitions allowed** - node remains in Host state permanently
+- Searching and Client states are blocked and cannot be entered
 
 ### Connection Flow
 
@@ -91,8 +104,10 @@ When a client detects that its host has disconnected (via liveliness monitoring)
 1. Transitions to **Searching** state
 2. Waits for a randomized timeout (prevents thundering herd)
 3. Queries for available hosts
-4. Becomes **Host** if no other hosts are found (if `auto_host` enabled)
+4. Becomes **Host** if no other hosts are found
 5. Otherwise, connects to an available host and becomes **Client**
+
+**Note**: Failover is not applicable when `force_host` is enabled, as the node is always a host.
 
 ## API Layers
 

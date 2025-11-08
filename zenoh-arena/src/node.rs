@@ -45,10 +45,23 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         
         tracing::info!("Node '{}' initialized with Zenoh session", id);
         
+        // Initial state depends on force_host configuration
+        let state = if config.force_host {
+            tracing::info!("Node '{}' forced to host mode", id);
+            let engine = get_engine();
+            NodeState::Host {
+                is_accepting: true,
+                connected_clients: Vec::new(),
+                engine,
+            }
+        } else {
+            NodeState::SearchingHost
+        };
+        
         Ok(Self {
             id,
             config,
-            state: NodeState::SearchingHost,
+            state,
             session: Arc::new(session),
             get_engine,
         })
@@ -69,23 +82,23 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// This is the main event loop that manages state transitions between
     /// SearchingHost -> Client or Host modes
     pub async fn run(&mut self) -> Result<()> {
+        // If force_host is enabled, only Host state is allowed
+        if self.config.force_host && !matches!(self.state, NodeState::Host { .. }) {
+            return Err(ArenaError::Internal(
+                "force_host is enabled but node is not in Host state".to_string(),
+            ));
+        }
+        
         // State machine implementation will be expanded in future phases
         match &mut self.state {
             NodeState::SearchingHost => {
+                // force_host check ensures we never reach here if force_host is true
                 tracing::info!("Node '{}' searching for hosts...", self.id);
                 // TODO: Implement host discovery logic
-                // For now, just transition to Host mode if auto_host is enabled
-                if self.config.auto_host {
-                    tracing::info!("Node '{}' becoming host (no hosts found)", self.id);
-                    let engine = (self.get_engine)();
-                    self.state = NodeState::Host {
-                        is_accepting: true,
-                        connected_clients: Vec::new(),
-                        engine,
-                    };
-                }
+                // For now, do nothing (placeholder for future implementation)
             }
             NodeState::Client { host_id } => {
+                // force_host check ensures we never reach here if force_host is true
                 tracing::info!("Node '{}' running as client connected to '{}'", self.id, host_id);
                 // TODO: Implement client behavior
             }
@@ -254,13 +267,34 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn test_node_run_becomes_host() {
+    async fn test_node_run_with_force_host() {
         let config = NodeConfig::default()
-            .with_auto_host(true);
+            .with_force_host(true);
         let get_engine = || TestEngine;
         
         let mut node = Node::new(config, get_engine).await.unwrap();
         let result = node.run().await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_node_force_host_starts_in_host_state() {
+        let config = NodeConfig::default()
+            .with_force_host(true);
+        let get_engine = || TestEngine;
+        
+        let node = Node::new(config, get_engine).await.unwrap();
+        // Node should be in Host state when force_host is true
+        assert!(matches!(node.state, NodeState::Host { .. }));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_node_default_starts_in_searching_state() {
+        let config = NodeConfig::default(); // force_host = false by default
+        let get_engine = || TestEngine;
+        
+        let node = Node::new(config, get_engine).await.unwrap();
+        // Node should be in SearchingHost state by default
+        assert!(matches!(node.state, NodeState::SearchingHost));
     }
 }

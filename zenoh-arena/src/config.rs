@@ -18,8 +18,8 @@ pub struct NodeConfig {
     /// Maximum number of clients per host (None = unlimited)
     pub max_clients: Option<usize>,
 
-    /// Whether to automatically become host if no hosts found
-    pub auto_host: bool,
+    /// Whether to force host mode (blocks Searching and Client states)
+    pub force_host: bool,
 
     /// Key expression prefix for arena communication
     pub keyexpr_prefix: String,
@@ -33,7 +33,7 @@ impl Default for NodeConfig {
             discovery_timeout_ms: 5000,
             discovery_jitter: 0.3,
             max_clients: Some(4),
-            auto_host: true,
+            force_host: false,
             keyexpr_prefix: "zenoh/arena".to_string(),
         }
     }
@@ -75,9 +75,9 @@ impl NodeConfig {
         self
     }
 
-    /// Set whether to automatically become host
-    pub fn with_auto_host(mut self, auto_host: bool) -> Self {
-        self.auto_host = auto_host;
+    /// Set whether to force host mode (blocks Searching and Client states)
+    pub fn with_force_host(mut self, force_host: bool) -> Self {
+        self.force_host = force_host;
         self
     }
 
