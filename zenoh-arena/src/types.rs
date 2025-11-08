@@ -2,6 +2,7 @@
 use std::time::Instant;
 
 use crate::error::{ArenaError, Result};
+use crate::network::NodeLivelinessToken;
 
 /// Unique node identifier
 ///
@@ -168,6 +169,9 @@ pub(crate) enum NodeStateInternal<E> {
         /// Game engine (only present in Host mode)
         #[allow(dead_code)]
         engine: E,
+        /// Liveliness token
+        #[allow(dead_code)]
+        liveliness_token: Option<NodeLivelinessToken>,
     },
 }
 

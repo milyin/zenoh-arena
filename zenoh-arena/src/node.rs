@@ -65,10 +65,19 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         let state = if config.force_host {
             tracing::info!("Node '{}' forced to host mode", id);
             let engine = get_engine();
+            
+            // Create liveliness token
+            let token = crate::network::NodeLivelinessToken::declare(
+                &session,
+                &config.keyexpr_prefix,
+                id.clone()
+            ).await?;
+            
             NodeStateInternal::Host {
                 is_accepting: true,
                 connected_clients: Vec::new(),
                 engine,
+                liveliness_token: Some(token),
             }
         } else {
             NodeStateInternal::SearchingHost

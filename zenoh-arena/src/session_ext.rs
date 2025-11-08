@@ -2,6 +2,7 @@
 use crate::config::NodeConfig;
 use crate::node::{GameEngine, Node};
 use crate::Result;
+use zenoh::key_expr::KeyExpr;
 use zenoh::Resolvable;
 
 /// Extension trait for zenoh::Session to add arena node declaration
@@ -81,6 +82,12 @@ impl<'a, E: GameEngine, F: Fn() -> E> NodeBuilder<'a, E, F> {
     /// Set the step timeout in milliseconds
     pub fn step_timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.config = self.config.with_step_timeout_ms(timeout_ms);
+        self
+    }
+
+    /// Set the key expression prefix
+    pub fn prefix(mut self, prefix: KeyExpr<'static>) -> Self {
+        self.config = self.config.with_keyexpr_prefix(prefix);
         self
     }
 }

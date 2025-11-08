@@ -55,6 +55,7 @@
 // Module declarations
 pub mod config;
 pub mod error;
+pub(crate) mod network;
 pub mod node;
 pub mod session_ext;
 pub mod types;
