@@ -2,7 +2,7 @@
 use crate::config::NodeConfig;
 use crate::node::{GameEngine, Node, NodeCommand};
 use crate::Result;
-use zenoh::{Resolvable, Wait};
+use zenoh::Resolvable;
 
 /// Extension trait for zenoh::Session to add arena node declaration
 pub trait SessionExt {
@@ -87,20 +87,6 @@ impl<'a, E: GameEngine, F: Fn() -> E> NodeBuilder<'a, E, F> {
 
 impl<'a, E: GameEngine, F: Fn() -> E> Resolvable for NodeBuilder<'a, E, F> {
     type To = Result<(Node<E, F>, flume::Sender<NodeCommand<E::Action>>)>;
-}
-
-impl<'a, E: GameEngine, F: Fn() -> E> Wait for NodeBuilder<'a, E, F> {
-    fn wait(self) -> <Self as Resolvable>::To {
-        // We need to block on the async Node::new_internal() method
-        // This is necessary because Wait::wait() is not async
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                // Clone the session since Node::new_internal takes ownership
-                let session = self.session.clone();
-                Node::new_internal(self.config, session, self.get_engine).await
-            })
-        })
-    }
 }
 
 impl<'a, E: GameEngine, F: Fn() -> E + Send + 'a> std::future::IntoFuture for NodeBuilder<'a, E, F> {
