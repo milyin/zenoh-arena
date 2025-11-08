@@ -1,29 +1,77 @@
 mod engine;
 
+use clap::Parser;
 use engine::{BonjourAction, BonjourEngine};
 use std::io::{self, Read};
+use std::path::PathBuf;
 use zenoh_arena::{NodeCommand, SessionExt};
+
+/// z_bonjour - Zenoh Arena Demo
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Node name
+    #[arg(short, long, default_value = "bonjour_node")]
+    name: String,
+
+    /// Key expression prefix
+    #[arg(short, long)]
+    prefix: Option<String>,
+
+    /// Force host mode
+    #[arg(short, long, default_value = "true")]
+    force_host: bool,
+
+    /// Path to Zenoh config file
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+}
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse command line arguments
+    let args = Args::parse();
+
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
+    // Create zenoh config
+    let zenoh_config = if let Some(config_path) = args.config {
+        zenoh::Config::from_file(config_path)
+            .map_err(|e| format!("Failed to load config file: {}", e))?
+    } else {
+        zenoh::Config::default()
+    };
+
     // Create zenoh session
-    let session = zenoh::open(zenoh::Config::default())
+    let session = zenoh::open(zenoh_config)
         .await
         .map_err(|e| format!("Failed to open zenoh session: {}", e))?;
 
-    // Declare node with force_host enabled for simplicity
-    let mut node = session
+    // Declare node with configured parameters
+    let mut node_builder = session
         .declare_arena_node(BonjourEngine::new)
-        .force_host(true)
-        .name("bonjour_node".to_string())?
-        .step_timeout_ms(1000)
-        .await?;
+        .force_host(args.force_host)
+        .name(args.name.clone())?
+        .step_timeout_ms(1000);
+
+    // Apply prefix if provided
+    let prefix_str = args.prefix.clone();
+    if let Some(prefix) = args.prefix {
+        let prefix_keyexpr: zenoh::key_expr::KeyExpr<'static> = prefix.try_into()
+            .map_err(|e| format!("Invalid prefix key expression: {}", e))?;
+        node_builder = node_builder.prefix(prefix_keyexpr);
+    }
+
+    let mut node = node_builder.await?;
 
     println!("=== z_bonjour - Zenoh Arena Demo ===");
+    println!("Node name: {}", args.name);
     println!("Node ID: {}", node.id());
+    println!("Force host: {}", args.force_host);
+    if let Some(prefix) = prefix_str {
+        println!("Prefix: {}", prefix);
+    }
     println!("Commands:");
     println!("  b - Send Bonjour action");
     println!("  q - Quit");
