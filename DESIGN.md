@@ -65,25 +65,36 @@ Searching for Hosts
 ### Module Organization
 
 ```
-zenoh-arena/
-├── src/
-│   ├── lib.rs              // Public API and re-exports
-│   ├── config.rs           // Configuration types
-│   ├── types.rs            // Core types and traits
-│   ├── arena.rs            // Main Arena coordinator
-│   ├── node.rs             // Node identity and state
-│   ├── host.rs             // Host role implementation
-│   ├── client.rs           // Client role implementation
-│   ├── network/
-│   │   ├── mod.rs          // Network layer coordinator
-│   │   ├── discovery.rs    // Host discovery using Queryable
-│   │   ├── connection.rs   // Connection management
-│   │   ├── liveliness.rs   // Liveliness token management
-│   │   └── transport.rs    // Message serialization/transport
-│   ├── engine/
-│   │   ├── mod.rs          // Game engine integration
-│   │   └── adapter.rs      // Engine adapter trait
-│   └── error.rs            // Error types
+zenoh-arena/             (workspace root)
+├── Cargo.toml          (workspace manifest)
+├── zenoh-arena/        (library crate)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs              // Public API and re-exports
+│   │   ├── config.rs           // Configuration types
+│   │   ├── types.rs            // Core types and traits
+│   │   ├── arena.rs            // Main Arena coordinator
+│   │   ├── node.rs             // Node identity and state
+│   │   ├── host.rs             // Host role implementation
+│   │   ├── client.rs           // Client role implementation
+│   │   ├── network/
+│   │   │   ├── mod.rs          // Network layer coordinator
+│   │   │   ├── discovery.rs    // Host discovery using Queryable
+│   │   │   ├── connection.rs   // Connection management
+│   │   │   ├── liveliness.rs   // Liveliness token management
+│   │   │   └── transport.rs    // Message serialization/transport
+│   │   ├── engine/
+│   │   │   ├── mod.rs          // Game engine integration
+│   │   │   └── adapter.rs      // Engine adapter trait
+│   │   └── error.rs            // Error types
+├── z_bonjour/          (minimal example for API verification)
+│   ├── Cargo.toml
+│   └── src/
+│       └── main.rs
+└── z_tetris/           (full game example)
+    ├── Cargo.toml
+    └── src/
+        └── main.rs
 ```
 
 ## Basic Types
@@ -493,10 +504,18 @@ pub type Result<T> = std::result::Result<T, ArenaError>;
 - [ ] State synchronization
 - [ ] Session lifecycle management
 
-### Phase 7: Testing & Examples
+### Phase 7: API Verification - z_bonjour Example
+- [ ] Simple game engine for API verification
+- [ ] Action type: `Bonjour` (single variant enum)
+- [ ] State type: `Bonsoir` (single variant enum)
+- [ ] Engine responds with `Bonsoir` to every `Bonjour` action
+- [ ] Minimal terminal UI to send actions and display state
+- [ ] Verify host discovery, connection, and state synchronization
+
+### Phase 8: Testing & Full Examples
 - [ ] Unit tests
 - [ ] Integration tests
-- [ ] z_tetris example application
+- [ ] z_tetris full game application
 - [ ] Documentation and examples
 
 ## Key Design Decisions
@@ -625,5 +644,89 @@ Required crates:
 - Empty host behavior
 
 ### Example Application
+
+#### z_bonjour - API Verification Example
+
+The simplest possible game to verify the API:
+
+**Purpose**: Verify core Arena functionality with minimal complexity
+
+**Game Types**:
+```rust
+#[derive(Debug, Clone)]
+enum BonjourAction {
+    Bonjour,
+}
+
+#[derive(Debug, Clone)]
+enum BonsoirState {
+    Bonsoir,
+}
+
+struct BonjourEngine;
+
+impl GameEngine for BonjourEngine {
+    type Action = BonjourAction;
+    type State = BonsoirState;
+    
+    fn initialize(&mut self) -> Result<Self::State, Box<dyn std::error::Error>> {
+        Ok(BonsoirState::Bonsoir)
+    }
+    
+    fn process_action(
+        &mut self,
+        action: Self::Action,
+        _client_id: &NodeId,
+    ) -> Result<Self::State, Box<dyn std::error::Error>> {
+        match action {
+            BonjourAction::Bonjour => Ok(BonsoirState::Bonsoir),
+        }
+    }
+    
+    fn current_state(&self) -> Self::State {
+        BonsoirState::Bonsoir
+    }
+    
+    // ... other trait methods with minimal implementations
+}
+
+// Implement zenoh-ext serialization for simple types
+impl zenoh_ext::Serialize for BonjourAction {
+    fn serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
+        // Minimal serialization - just write a tag byte
+        zenoh_ext::z_serialize(&0u8, writer)
+    }
+}
+
+impl zenoh_ext::Deserialize for BonjourAction {
+    fn deserialize<R: std::io::Read>(reader: R) -> Result<Self, std::io::Error> {
+        let _: u8 = zenoh_ext::z_deserialize(reader)?;
+        Ok(BonjourAction::Bonjour)
+    }
+}
+
+// Similar implementations for BonsoirState
+```
+
+**Terminal UI**:
+- Display current arena state (Searching/Client/Host)
+- Display connected clients (if host)
+- Press any key to send `Bonjour` action
+- Display received `Bonsoir` state
+- Press 'q' to quit
+
+**Verification Goals**:
+- Host discovery works correctly
+- Client-host connection established
+- Actions sent from client reach host engine
+- State updates broadcast to all clients
+- Multiple instances can find each other
+- Liveliness detection and reconnection
+- Host/client role transitions
+
+#### z_tetris - Full Game Example
+
 - z_tetris serves as both example and integration test
 - Real-world usage patterns and edge cases
+- Uses gametetris-rs library as game engine
+- Demonstrates complex state synchronization
