@@ -170,3 +170,22 @@ impl<E> NodeStateInternal<E> {
         }
     }
 }
+
+impl<E> From<&NodeStateInternal<E>> for NodeState {
+    fn from(internal: &NodeStateInternal<E>) -> Self {
+        match internal {
+            NodeStateInternal::SearchingHost => NodeState::SearchingHost,
+            NodeStateInternal::Client { host_id } => NodeState::Client {
+                host_id: host_id.clone(),
+            },
+            NodeStateInternal::Host {
+                is_accepting,
+                connected_clients,
+                ..
+            } => NodeState::Host {
+                is_accepting: *is_accepting,
+                connected_clients: connected_clients.clone(),
+            },
+        }
+    }
+}

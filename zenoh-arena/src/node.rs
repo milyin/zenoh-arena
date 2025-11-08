@@ -180,17 +180,8 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             }
         }
         
-        // Build the node state info
-        let state_info = match &self.state {
-            NodeStateInternal::SearchingHost => NodeState::SearchingHost,
-            NodeStateInternal::Client { host_id } => NodeState::Client {
-                host_id: host_id.clone(),
-            },
-            NodeStateInternal::Host { is_accepting, connected_clients, .. } => NodeState::Host {
-                is_accepting: *is_accepting,
-                connected_clients: connected_clients.clone(),
-            },
-        };
+        // Build the node state info using From trait
+        let state_info = NodeState::from(&self.state);
         
         Ok(Some(NodeStatus {
             state: state_info,
