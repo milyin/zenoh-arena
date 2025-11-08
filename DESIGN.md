@@ -607,7 +607,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Dependencies
 
-Required crates:
+**Workspace Cargo.toml**:
+```toml
+[workspace]
+members = ["zenoh-arena", "z_bonjour", "z_tetris"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+zenoh = "1.6"
+zenoh-ext = "1.6"
+tokio = { version = "1", features = ["full"] }
+thiserror = "1"
+uuid = { version = "1", features = ["v4"] }
+bs58 = "0.5"
+rand = "0.8"
+tracing = "0.1"
+```
+
+**Library crate dependencies** (`zenoh-arena/Cargo.toml`):
 - `zenoh` - Core networking and key expressions
 - `zenoh-ext` - Serialization (Serialize/Deserialize traits, z_serialize/z_deserialize)
 - `tokio` - Async runtime
@@ -616,6 +637,11 @@ Required crates:
 - `bs58` - Base58 encoding for keyexpr-safe node IDs
 - `rand` - Randomized timeouts
 - `tracing` - Logging/diagnostics
+
+**Example crates** (`z_bonjour/Cargo.toml`, `z_tetris/Cargo.toml`):
+- `zenoh-arena` (from workspace)
+- `tokio` - For async main
+- Additional UI/game dependencies as needed
 
 ## Open Questions & Future Enhancements
 
