@@ -33,6 +33,7 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
     session: Arc<zenoh::Session>,
 
     /// Engine factory - called when transitioning to host mode
+    #[allow(dead_code)]
     get_engine: F,
 
     /// Receiver for commands from the application
