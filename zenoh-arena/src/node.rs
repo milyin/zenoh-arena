@@ -191,26 +191,8 @@ pub trait GameEngine: Send + Sync {
     /// State type sent to clients
     type State: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone;
 
-    /// Initialize the game engine
-    fn initialize(&mut self) -> Result<Self::State>;
-
     /// Process an action and return new state
     fn process_action(&mut self, action: Self::Action, client_id: &NodeId) -> Result<Self::State>;
-
-    /// Get current state
-    fn current_state(&self) -> Self::State;
-
-    /// Tick/update game state (for time-based games)
-    fn tick(&mut self, delta_ms: u64) -> Option<Self::State>;
-
-    /// Client connected notification
-    fn client_connected(&mut self, client_id: &NodeId);
-
-    /// Client disconnected notification
-    fn client_disconnected(&mut self, client_id: &NodeId);
-
-    /// Check if game session has ended
-    fn is_session_ended(&self) -> bool;
 }
 
 #[cfg(test)]
@@ -225,31 +207,12 @@ mod tests {
         type Action = u32;
         type State = String;
 
-        fn initialize(&mut self) -> Result<Self::State> {
-            Ok("initialized".to_string())
-        }
-
         fn process_action(
             &mut self,
             _action: Self::Action,
             _client_id: &NodeId,
         ) -> Result<Self::State> {
             Ok("processed".to_string())
-        }
-
-        fn current_state(&self) -> Self::State {
-            "current".to_string()
-        }
-
-        fn tick(&mut self, _delta_ms: u64) -> Option<Self::State> {
-            None
-        }
-
-        fn client_connected(&mut self, _client_id: &NodeId) {}
-        fn client_disconnected(&mut self, _client_id: &NodeId) {}
-
-        fn is_session_ended(&self) -> bool {
-            false
         }
     }
 
