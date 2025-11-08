@@ -31,17 +31,13 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Create a new Node instance
     ///
     /// `get_engine` is a factory function that creates an engine when needed
-    pub async fn new(config: NodeConfig, get_engine: F) -> Result<Self> {
+    /// `session` is a Zenoh session that will be owned by the Node
+    pub async fn new(config: NodeConfig, session: zenoh::Session, get_engine: F) -> Result<Self> {
         // Create or validate node ID
         let id = match &config.node_name {
             Some(name) => NodeId::from_name(name.clone())?,
             None => NodeId::generate(),
         };
-        
-        // Initialize Zenoh session with provided configuration
-        let session = zenoh::open(config.zenoh_config.clone())
-            .await
-            .map_err(ArenaError::Zenoh)?;
         
         tracing::info!("Node '{}' initialized with Zenoh session", id);
         
@@ -228,9 +224,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
         let config = NodeConfig::default();
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let node = Node::new(config, get_engine).await;
+        let node = Node::new(config, session, get_engine).await;
         assert!(node.is_ok());
         
         let node = node.unwrap();
@@ -241,9 +238,10 @@ mod tests {
     async fn test_node_creation_with_custom_name() {
         let config = NodeConfig::default()
             .with_node_name("my_custom_node".to_string());
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let node = Node::new(config, get_engine).await;
+        let node = Node::new(config, session, get_engine).await;
         assert!(node.is_ok());
         
         let node = node.unwrap();
@@ -254,9 +252,10 @@ mod tests {
     async fn test_node_creation_with_invalid_name() {
         let config = NodeConfig::default()
             .with_node_name("invalid/name".to_string());
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let result = Node::new(config, get_engine).await;
+        let result = Node::new(config, session, get_engine).await;
         assert!(result.is_err());
         if let Err(e) = result {
             match e {
@@ -270,9 +269,10 @@ mod tests {
     async fn test_node_run_with_force_host() {
         let config = NodeConfig::default()
             .with_force_host(true);
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let mut node = Node::new(config, get_engine).await.unwrap();
+        let mut node = Node::new(config, session, get_engine).await.unwrap();
         let result = node.run().await;
         assert!(result.is_ok());
     }
@@ -281,9 +281,10 @@ mod tests {
     async fn test_node_force_host_starts_in_host_state() {
         let config = NodeConfig::default()
             .with_force_host(true);
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let node = Node::new(config, get_engine).await.unwrap();
+        let node = Node::new(config, session, get_engine).await.unwrap();
         // Node should be in Host state when force_host is true
         assert!(matches!(node.state, NodeState::Host { .. }));
     }
@@ -291,9 +292,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
         let config = NodeConfig::default(); // force_host = false by default
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let node = Node::new(config, get_engine).await.unwrap();
+        let node = Node::new(config, session, get_engine).await.unwrap();
         // Node should be in SearchingHost state by default
         assert!(matches!(node.state, NodeState::SearchingHost));
     }
