@@ -25,14 +25,24 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
     
     /// Engine factory - called when transitioning to host mode
     get_engine: F,
+    
+    /// Receiver for actions from the application
+    action_rx: flume::Receiver<E::Action>,
 }
 
 impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Create a new Node instance
     ///
+    /// Returns a tuple of (Node, action_sender) where action_sender is used by the
+    /// application to send actions to the node.
+    ///
     /// `get_engine` is a factory function that creates an engine when needed
     /// `session` is a Zenoh session that will be owned by the Node
-    pub async fn new(config: NodeConfig, session: zenoh::Session, get_engine: F) -> Result<Self> {
+    pub async fn new(
+        config: NodeConfig,
+        session: zenoh::Session,
+        get_engine: F,
+    ) -> Result<(Self, flume::Sender<E::Action>)> {
         // Create or validate node ID
         let id = match &config.node_name {
             Some(name) => NodeId::from_name(name.clone())?,
@@ -40,6 +50,9 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         };
         
         tracing::info!("Node '{}' initialized with Zenoh session", id);
+        
+        // Create action channel
+        let (action_tx, action_rx) = flume::unbounded();
         
         // Initial state depends on force_host configuration
         let state = if config.force_host {
@@ -54,13 +67,16 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             NodeState::SearchingHost
         };
         
-        Ok(Self {
+        let node = Self {
             id,
             config,
             state,
             session: Arc::new(session),
             get_engine,
-        })
+            action_rx,
+        };
+        
+        Ok((node, action_tx))
     }
     
     /// Get node ID
@@ -75,8 +91,10 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     
     /// Run the node state machine
     ///
-    /// This is the main event loop that manages state transitions between
-    /// SearchingHost -> Client or Host modes
+    /// This is the main event loop that manages state transitions and processes actions.
+    /// Actions received from the action channel are either:
+    /// - In Host mode: passed directly to the game engine
+    /// - In Client mode: forwarded to the remote host
     pub async fn run(&mut self) -> Result<()> {
         // If force_host is enabled, only Host state is allowed
         if self.config.force_host && !matches!(self.state, NodeState::Host { .. }) {
@@ -85,27 +103,49 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             ));
         }
         
-        // State machine implementation will be expanded in future phases
-        match &mut self.state {
-            NodeState::SearchingHost => {
-                // force_host check ensures we never reach here if force_host is true
-                tracing::info!("Node '{}' searching for hosts...", self.id);
-                // TODO: Implement host discovery logic
-                // For now, do nothing (placeholder for future implementation)
-            }
-            NodeState::Client { host_id } => {
-                // force_host check ensures we never reach here if force_host is true
-                tracing::info!("Node '{}' running as client connected to '{}'", self.id, host_id);
-                // TODO: Implement client behavior
-            }
-            NodeState::Host { is_accepting, connected_clients, engine: _ } => {
-                tracing::info!(
-                    "Node '{}' running as host (accepting: {}, clients: {})",
-                    self.id,
-                    is_accepting,
-                    connected_clients.len()
-                );
-                // TODO: Implement host behavior
+        // Main event loop - process actions from the channel
+        loop {
+            // Try to receive an action (non-blocking check)
+            match self.action_rx.try_recv() {
+                Ok(action) => {
+                    // Process action based on current state
+                    match &mut self.state {
+                        NodeState::SearchingHost => {
+                            tracing::warn!(
+                                "Node '{}' received action while searching for host, ignoring",
+                                self.id
+                            );
+                            // Actions are ignored while searching for a host
+                        }
+                        NodeState::Client { host_id } => {
+                            tracing::debug!(
+                                "Node '{}' forwarding action to host '{}'",
+                                self.id,
+                                host_id
+                            );
+                            // TODO: Forward action to remote host via Zenoh pub/sub
+                            // Placeholder for Phase 4 implementation
+                        }
+                        NodeState::Host { engine, .. } => {
+                            tracing::debug!(
+                                "Node '{}' processing action in host mode",
+                                self.id
+                            );
+                            // Process action directly in the engine
+                            let _new_state = engine.process_action(action, &self.id)?;
+                            // TODO: Broadcast new state to clients (Phase 4)
+                        }
+                    }
+                }
+                Err(flume::TryRecvError::Empty) => {
+                    // No actions available, yield to allow other tasks to run
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+                Err(flume::TryRecvError::Disconnected) => {
+                    // Channel closed, exit the loop
+                    tracing::info!("Node '{}' action channel closed, stopping", self.id);
+                    break;
+                }
             }
         }
         
@@ -227,10 +267,10 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let node = Node::new(config, session, get_engine).await;
-        assert!(node.is_ok());
+        let result = Node::new(config, session, get_engine).await;
+        assert!(result.is_ok());
         
-        let node = node.unwrap();
+        let (node, _action_tx) = result.unwrap();
         assert!(!node.id().as_str().is_empty());
     }
 
@@ -241,10 +281,10 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let node = Node::new(config, session, get_engine).await;
-        assert!(node.is_ok());
+        let result = Node::new(config, session, get_engine).await;
+        assert!(result.is_ok());
         
-        let node = node.unwrap();
+        let (node, _action_tx) = result.unwrap();
         assert_eq!(node.id().as_str(), "my_custom_node");
     }
 
@@ -272,8 +312,17 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let mut node = Node::new(config, session, get_engine).await.unwrap();
-        let result = node.run().await;
+        let (mut node, action_tx) = Node::new(config, session, get_engine).await.unwrap();
+        
+        // Spawn run in background and immediately stop it by closing the channel
+        let run_handle = tokio::spawn(async move {
+            node.run().await
+        });
+        
+        // Close the action channel to stop the run loop
+        drop(action_tx);
+        
+        let result = run_handle.await.unwrap();
         assert!(result.is_ok());
     }
 
@@ -284,7 +333,7 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let node = Node::new(config, session, get_engine).await.unwrap();
+        let (node, _action_tx) = Node::new(config, session, get_engine).await.unwrap();
         // Node should be in Host state when force_host is true
         assert!(matches!(node.state, NodeState::Host { .. }));
     }
@@ -295,8 +344,37 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
-        let node = Node::new(config, session, get_engine).await.unwrap();
+        let (node, _action_tx) = Node::new(config, session, get_engine).await.unwrap();
         // Node should be in SearchingHost state by default
         assert!(matches!(node.state, NodeState::SearchingHost));
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_node_processes_actions_in_host_mode() {
+        let config = NodeConfig::default()
+            .with_force_host(true);
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+        let get_engine = || TestEngine;
+        
+        let (mut node, action_tx) = Node::new(config, session, get_engine).await.unwrap();
+        
+        // Spawn run in background
+        let run_handle = tokio::spawn(async move {
+            node.run().await
+        });
+        
+        // Send some actions
+        action_tx.send(42).unwrap();
+        action_tx.send(100).unwrap();
+        
+        // Give it a moment to process
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        
+        // Close the action channel to stop the run loop
+        drop(action_tx);
+        
+        let result = run_handle.await.unwrap();
+        assert!(result.is_ok());
+    }
 }
+
