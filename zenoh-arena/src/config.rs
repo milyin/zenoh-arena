@@ -20,6 +20,10 @@ pub struct NodeConfig {
 
     /// Key expression prefix for arena communication
     pub keyexpr_prefix: String,
+
+    /// Timeout for step() method in milliseconds
+    /// step() returns when either new game state is available or this timeout elapses
+    pub step_timeout_ms: u64,
 }
 
 impl Default for NodeConfig {
@@ -31,6 +35,7 @@ impl Default for NodeConfig {
             max_clients: Some(4),
             force_host: false,
             keyexpr_prefix: "zenoh/arena".to_string(),
+            step_timeout_ms: 100,
         }
     }
 }
@@ -74,6 +79,12 @@ impl NodeConfig {
     /// Set the key expression prefix
     pub fn with_keyexpr_prefix(mut self, prefix: String) -> Self {
         self.keyexpr_prefix = prefix;
+        self
+    }
+
+    /// Set the step timeout in milliseconds
+    pub fn with_step_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.step_timeout_ms = timeout_ms;
         self
     }
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
-use crate::types::{NodeId, NodeState};
+use crate::types::{NodeId, NodeState, NodeStateInfo, NodeStatus};
 
 /// Commands that can be sent to the node
 #[derive(Debug, Clone)]
@@ -98,13 +98,16 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         &self.session
     }
     
-    /// Run the node state machine
+    /// Execute one step of the node state machine
     ///
-    /// This is the main event loop that manages state transitions and processes commands.
-    /// Commands received from the command channel are either:
-    /// - GameAction: In Host mode, passed to engine; in Client mode, forwarded to host
-    /// - Stop: Exits the run loop gracefully
-    pub async fn run(&mut self) -> Result<()> {
+    /// Processes commands from the command channel and returns the current node status.
+    /// Returns when either:
+    /// - A new game state is produced by the engine
+    /// - The step timeout (configured in NodeConfig) elapses
+    /// - A Stop command is received (returns None)
+    ///
+    /// Returns None if Stop command was received, indicating the node should shut down.
+    pub async fn step(&mut self) -> Result<Option<NodeStatus<E::State>>> {
         // If force_host is enabled, only Host state is allowed
         if self.config.force_host && !matches!(self.state, NodeState::Host { .. }) {
             return Err(ArenaError::Internal(
@@ -112,61 +115,87 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             ));
         }
         
-        // Main event loop - process commands from the channel
+        let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
+        let sleep = tokio::time::sleep(timeout);
+        tokio::pin!(sleep);
+        
+        let mut new_game_state: Option<E::State> = None;
+        
+        // Process commands until timeout or new state
         loop {
-            // Try to receive a command (non-blocking check)
-            match self.command_rx.try_recv() {
-                Ok(command) => {
-                    match command {
-                        NodeCommand::Stop => {
-                            tracing::info!("Node '{}' received Stop command, exiting", self.id);
-                            break;
-                        }
-                        NodeCommand::GameAction(action) => {
-                            // Process action based on current state
-                            match &mut self.state {
-                                NodeState::SearchingHost => {
-                                    tracing::warn!(
-                                        "Node '{}' received action while searching for host, ignoring",
-                                        self.id
-                                    );
-                                    // Actions are ignored while searching for a host
+            tokio::select! {
+                // Timeout elapsed
+                () = &mut sleep => {
+                    break;
+                }
+                // Command received
+                result = self.command_rx.recv_async() => {
+                    match result {
+                        Ok(command) => {
+                            match command {
+                                NodeCommand::Stop => {
+                                    tracing::info!("Node '{}' received Stop command, exiting", self.id);
+                                    return Ok(None);
                                 }
-                                NodeState::Client { host_id } => {
-                                    tracing::debug!(
-                                        "Node '{}' forwarding action to host '{}'",
-                                        self.id,
-                                        host_id
-                                    );
-                                    // TODO: Forward action to remote host via Zenoh pub/sub
-                                    // Placeholder for Phase 4 implementation
-                                }
-                                NodeState::Host { engine, .. } => {
-                                    tracing::debug!(
-                                        "Node '{}' processing action in host mode",
-                                        self.id
-                                    );
-                                    // Process action directly in the engine
-                                    let _new_state = engine.process_action(action, &self.id)?;
-                                    // TODO: Broadcast new state to clients (Phase 4)
+                                NodeCommand::GameAction(action) => {
+                                    // Process action based on current state
+                                    match &mut self.state {
+                                        NodeState::SearchingHost => {
+                                            tracing::warn!(
+                                                "Node '{}' received action while searching for host, ignoring",
+                                                self.id
+                                            );
+                                            // Actions are ignored while searching for a host
+                                        }
+                                        NodeState::Client { host_id } => {
+                                            tracing::debug!(
+                                                "Node '{}' forwarding action to host '{}'",
+                                                self.id,
+                                                host_id
+                                            );
+                                            // TODO: Forward action to remote host via Zenoh pub/sub
+                                            // Placeholder for Phase 4 implementation
+                                        }
+                                        NodeState::Host { engine, .. } => {
+                                            tracing::debug!(
+                                                "Node '{}' processing action in host mode",
+                                                self.id
+                                            );
+                                            // Process action directly in the engine and get new state
+                                            new_game_state = Some(engine.process_action(action, &self.id)?);
+                                            // New state available, return immediately
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         }
+                        Err(_) => {
+                            // Channel disconnected
+                            tracing::info!("Node '{}' command channel closed", self.id);
+                            return Ok(None);
+                        }
                     }
-                }
-                Err(flume::TryRecvError::Empty) => {
-                    // No commands available, yield to allow other tasks to run
-                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                }
-                Err(flume::TryRecvError::Disconnected) => {
-                    // Channel closed, exit the loop
-                    tracing::info!("Node '{}' command channel closed, stopping", self.id);
-                    break;
                 }
             }
         }
         
-        Ok(())
+        // Build the node state info
+        let state_info = match &self.state {
+            NodeState::SearchingHost => NodeStateInfo::SearchingHost,
+            NodeState::Client { host_id } => NodeStateInfo::Client {
+                host_id: host_id.clone(),
+            },
+            NodeState::Host { is_accepting, connected_clients, .. } => NodeStateInfo::Host {
+                is_accepting: *is_accepting,
+                connected_clients: connected_clients.clone(),
+            },
+        };
+        
+        Ok(Some(NodeStatus {
+            state: state_info,
+            game_state: new_game_state,
+        }))
     }
 }
 
@@ -323,7 +352,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn test_node_run_with_force_host() {
+    async fn test_node_step_with_force_host() {
         let config = NodeConfig::default()
             .with_force_host(true);
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
@@ -331,15 +360,26 @@ mod tests {
         
         let (mut node, command_tx) = Node::new(config, session, get_engine).await.unwrap();
         
-        // Spawn run in background
-        let run_handle = tokio::spawn(async move {
-            node.run().await
+        // Spawn step loop in background
+        let step_handle = tokio::spawn(async move {
+            loop {
+                match node.step().await {
+                    Ok(Some(_status)) => {
+                        // Continue stepping
+                    }
+                    Ok(None) => {
+                        // Stop command received
+                        break Ok(());
+                    }
+                    Err(e) => break Err(e),
+                }
+            }
         });
         
-        // Send Stop command to exit the run loop
+        // Send Stop command to exit the loop
         command_tx.send(NodeCommand::Stop).unwrap();
         
-        let result = run_handle.await.unwrap();
+        let result: Result<()> = step_handle.await.unwrap();
         assert!(result.is_ok());
     }
 
@@ -369,29 +409,30 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
         let config = NodeConfig::default()
-            .with_force_host(true);
+            .with_force_host(true)
+            .with_step_timeout_ms(50);
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
         
         let (mut node, command_tx) = Node::new(config, session, get_engine).await.unwrap();
         
-        // Spawn run in background
-        let run_handle = tokio::spawn(async move {
-            node.run().await
-        });
-        
         // Send some game actions
         command_tx.send(NodeCommand::GameAction(42)).unwrap();
         command_tx.send(NodeCommand::GameAction(100)).unwrap();
         
-        // Give it a moment to process
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        // Call step to process first action
+        let status1 = node.step().await.unwrap();
+        assert!(status1.is_some());
+        let status1 = status1.unwrap();
+        assert!(status1.game_state.is_some());
+        assert_eq!(status1.game_state.unwrap(), "processed");
         
-        // Send Stop command to exit the run loop
-        command_tx.send(NodeCommand::Stop).unwrap();
-        
-        let result = run_handle.await.unwrap();
-        assert!(result.is_ok());
+        // Call step to process second action
+        let status2 = node.step().await.unwrap();
+        assert!(status2.is_some());
+        let status2 = status2.unwrap();
+        assert!(status2.game_state.is_some());
+        assert_eq!(status2.game_state.unwrap(), "processed");
     }
 }
 

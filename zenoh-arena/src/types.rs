@@ -83,6 +83,34 @@ pub struct NodeInfo {
     pub connected_since: Instant,
 }
 
+/// Public node state returned by step() method
+#[derive(Debug, Clone)]
+pub enum NodeStateInfo {
+    /// Searching for available hosts
+    SearchingHost,
+    /// Connected as client to a host
+    Client {
+        /// ID of the host we're connected to
+        host_id: NodeId,
+    },
+    /// Acting as host
+    Host {
+        /// Whether accepting new clients
+        is_accepting: bool,
+        /// List of connected client IDs
+        connected_clients: Vec<NodeId>,
+    },
+}
+
+/// Status returned by Node::step() method
+#[derive(Debug, Clone)]
+pub struct NodeStatus<S> {
+    /// Current node state (Searching, Client, or Host)
+    pub state: NodeStateInfo,
+    /// Current game state (if available)
+    pub game_state: Option<S>,
+}
+
 /// Current state of a Node (internal)
 #[derive(Debug)]
 pub(crate) enum NodeState<E> {
