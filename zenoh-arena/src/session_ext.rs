@@ -2,7 +2,7 @@
 use crate::config::NodeConfig;
 use crate::node::{GameEngine, Node, NodeCommand};
 use crate::Result;
-use zenoh_core::{Resolvable, Wait};
+use zenoh::{Resolvable, Wait};
 
 /// Extension trait for zenoh::Session to add arena node declaration
 pub trait SessionExt {

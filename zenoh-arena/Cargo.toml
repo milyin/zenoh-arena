@@ -6,7 +6,6 @@ edition.workspace = true
 [dependencies]
 zenoh = { workspace = true }
 zenoh-ext = { workspace = true }
-zenoh-core = { workspace = true }
 tokio = { workspace = true }
 flume = { workspace = true }
 thiserror = { workspace = true }
