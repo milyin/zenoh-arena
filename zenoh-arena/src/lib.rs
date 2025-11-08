@@ -44,6 +44,7 @@
 //!     let node = session
 //!         .declare_arena_node(|| MyEngine)
 //!         .name("my_node".to_string())
+//!         .unwrap()
 //!         .force_host(true)
 //!         .await
 //!         .unwrap();

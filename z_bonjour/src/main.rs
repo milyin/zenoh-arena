@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut node = session
         .declare_arena_node(BonjourEngine::new)
         .force_host(true)
-        .name("bonjour_node".to_string())
+        .name("bonjour_node".to_string())?
         .step_timeout_ms(1000)
         .await?;
 

@@ -50,11 +50,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         session: zenoh::Session,
         get_engine: F,
     ) -> Result<Self> {
-        // Create or validate node ID
-        let id = match &config.node_name {
-            Some(name) => NodeId::from_name(name.clone())?,
-            None => NodeId::generate(),
-        };
+        let id = config.node_id.clone();
 
         tracing::info!("Node '{}' initialized with Zenoh session", id);
 
@@ -285,6 +281,7 @@ mod tests {
         let result = session
             .declare_arena_node(get_engine)
             .name("my_custom_node".to_string())
+            .unwrap()
             .await;
         assert!(result.is_ok());
 
@@ -299,12 +296,12 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let result = session
+        let builder_result = session
             .declare_arena_node(get_engine)
-            .name("invalid/name".to_string())
-            .await;
-        assert!(result.is_err());
-        if let Err(e) = result {
+            .name("invalid/name".to_string());
+        
+        assert!(builder_result.is_err());
+        if let Err(e) = builder_result {
             match e {
                 ArenaError::InvalidNodeName(_) => {} // Expected
                 other => panic!("Expected InvalidNodeName error, got {:?}", other),
@@ -423,11 +420,12 @@ mod tests {
         // Create a zenoh session
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
 
-        // Use the extension trait to declare a node
+        // Use the extension trait to declare a node (name must be called first)
         let node = session
             .declare_arena_node(|| TestEngine)
-            .force_host(true)
             .name("test_node".to_string())
+            .unwrap()
+            .force_host(true)
             .step_timeout_ms(50)
             .await
             .unwrap();

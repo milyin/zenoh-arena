@@ -1,6 +1,7 @@
 /// Extension trait for zenoh::Session to declare arena nodes
 use crate::config::NodeConfig;
 use crate::node::{GameEngine, Node};
+use crate::types::NodeId;
 use crate::Result;
 use zenoh::key_expr::KeyExpr;
 use zenoh::Resolvable;
@@ -68,26 +69,26 @@ impl<'a, E: GameEngine, F: Fn() -> E> NodeBuilder<'a, E, F> {
     }
 
     /// Set the node name
-    pub fn name(mut self, name: String) -> Self {
-        self.config = self.config.with_node_name(name);
-        self
+    pub fn name(mut self, name: String) -> Result<Self> {
+        self.config.node_id = NodeId::from_name(name)?;
+        Ok(self)
     }
 
     /// Enable force_host mode
     pub fn force_host(mut self, force_host: bool) -> Self {
-        self.config = self.config.with_force_host(force_host);
+        self.config.force_host = force_host;
         self
     }
 
     /// Set the step timeout in milliseconds
     pub fn step_timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.config = self.config.with_step_timeout_ms(timeout_ms);
+        self.config.step_timeout_ms = timeout_ms;
         self
     }
 
     /// Set the key expression prefix
     pub fn prefix(mut self, prefix: KeyExpr<'static>) -> Self {
-        self.config = self.config.with_keyexpr_prefix(prefix);
+        self.config.keyexpr_prefix = prefix;
         self
     }
 }

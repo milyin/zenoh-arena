@@ -150,7 +150,10 @@ impl<S: std::fmt::Display> std::fmt::Display for NodeStatus<S> {
 /// Current state of a Node (internal)
 #[derive(Debug)]
 #[derive(Default)]
-pub(crate) enum NodeStateInternal<E> {
+pub(crate) enum NodeStateInternal<E>
+where
+    E: crate::node::GameEngine,
+{
     /// Searching for available hosts
     #[default]
     SearchingHost,
@@ -177,7 +180,10 @@ pub(crate) enum NodeStateInternal<E> {
     },
 }
 
-impl<E> NodeStateInternal<E> {
+impl<E> NodeStateInternal<E>
+where
+    E: crate::node::GameEngine,
+{
     /// Check if currently in host mode
     #[allow(dead_code)]
     pub fn is_host(&self) -> bool {
@@ -281,7 +287,10 @@ impl<E> NodeStateInternal<E> {
     }
 }
 
-impl<E> From<&NodeStateInternal<E>> for NodeState {
+impl<E> From<&NodeStateInternal<E>> for NodeState
+where
+    E: crate::node::GameEngine,
+{
     fn from(internal: &NodeStateInternal<E>) -> Self {
         match internal {
             NodeStateInternal::SearchingHost => NodeState::SearchingHost,

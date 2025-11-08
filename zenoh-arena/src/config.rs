@@ -1,12 +1,13 @@
 //! Configuration for a Node
 
+use crate::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
 /// Main configuration for a Node
 #[derive(Debug, Clone)]
 pub(crate) struct NodeConfig {
-    /// Optional node name (auto-generated if None)
-    pub node_name: Option<String>,
+    /// Node identifier
+    pub node_id: NodeId,
 
     /// Whether to force host mode (blocks Searching and Client states)
     pub force_host: bool,
@@ -22,36 +23,10 @@ pub(crate) struct NodeConfig {
 impl Default for NodeConfig {
     fn default() -> Self {
         Self {
-            node_name: None,
+            node_id: NodeId::generate(),
             force_host: false,
             step_timeout_ms: 100,
             keyexpr_prefix: KeyExpr::try_from("zenoh/arena").unwrap().into_owned(),
         }
-    }
-}
-
-impl NodeConfig {
-    /// Set the node name
-    pub fn with_node_name(mut self, name: String) -> Self {
-        self.node_name = Some(name);
-        self
-    }
-
-    /// Set whether to force host mode (blocks Searching and Client states)
-    pub fn with_force_host(mut self, force_host: bool) -> Self {
-        self.force_host = force_host;
-        self
-    }
-
-    /// Set the step timeout in milliseconds
-    pub fn with_step_timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.step_timeout_ms = timeout_ms;
-        self
-    }
-
-    /// Set the key expression prefix
-    pub fn with_keyexpr_prefix(mut self, prefix: KeyExpr<'static>) -> Self {
-        self.keyexpr_prefix = prefix;
-        self
     }
 }
