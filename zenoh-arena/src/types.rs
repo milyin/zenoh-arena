@@ -85,7 +85,7 @@ pub struct NodeInfo {
 
 /// Public node state returned by step() method
 #[derive(Debug, Clone)]
-pub enum NodeStateInfo {
+pub enum NodeState {
     /// Searching for available hosts
     SearchingHost,
     /// Connected as client to a host
@@ -106,14 +106,14 @@ pub enum NodeStateInfo {
 #[derive(Debug, Clone)]
 pub struct NodeStatus<S> {
     /// Current node state (Searching, Client, or Host)
-    pub state: NodeStateInfo,
+    pub state: NodeState,
     /// Current game state (if available)
     pub game_state: Option<S>,
 }
 
 /// Current state of a Node (internal)
 #[derive(Debug)]
-pub(crate) enum NodeState<E> {
+pub(crate) enum NodeStateInternal<E> {
     /// Searching for available hosts
     SearchingHost,
 
@@ -136,17 +136,17 @@ pub(crate) enum NodeState<E> {
     },
 }
 
-impl<E> NodeState<E> {
+impl<E> NodeStateInternal<E> {
     /// Check if currently in host mode
     #[allow(dead_code)]
     pub fn is_host(&self) -> bool {
-        matches!(self, NodeState::Host { .. })
+        matches!(self, NodeStateInternal::Host { .. })
     }
 
     /// Check if currently in client mode
     #[allow(dead_code)]
     pub fn is_client(&self) -> bool {
-        matches!(self, NodeState::Client { .. })
+        matches!(self, NodeStateInternal::Client { .. })
     }
 
     /// Check if host mode and accepting clients
@@ -154,7 +154,7 @@ impl<E> NodeState<E> {
     pub fn is_accepting_clients(&self) -> bool {
         matches!(
             self,
-            NodeState::Host {
+            NodeStateInternal::Host {
                 is_accepting: true,
                 ..
             }
@@ -165,7 +165,7 @@ impl<E> NodeState<E> {
     #[allow(dead_code)]
     pub fn client_count(&self) -> Option<usize> {
         match self {
-            NodeState::Host { connected_clients, .. } => Some(connected_clients.len()),
+            NodeStateInternal::Host { connected_clients, .. } => Some(connected_clients.len()),
             _ => None,
         }
     }

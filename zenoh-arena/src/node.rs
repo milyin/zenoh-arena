@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
-use crate::types::{NodeId, NodeState, NodeStateInfo, NodeStatus};
+use crate::types::{NodeId, NodeStateInternal, NodeState, NodeStatus};
 
 /// Commands that can be sent to the node
 #[derive(Debug, Clone)]
@@ -27,7 +27,7 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
     config: NodeConfig,
     
     /// Current node state
-    state: NodeState<E>,
+    state: NodeStateInternal<E>,
     
     /// Zenoh session (wrapped for shared access)
     session: Arc<zenoh::Session>,
@@ -67,13 +67,13 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         let state = if config.force_host {
             tracing::info!("Node '{}' forced to host mode", id);
             let engine = get_engine();
-            NodeState::Host {
+            NodeStateInternal::Host {
                 is_accepting: true,
                 connected_clients: Vec::new(),
                 engine,
             }
         } else {
-            NodeState::SearchingHost
+            NodeStateInternal::SearchingHost
         };
         
         let node = Self {
@@ -109,7 +109,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Returns None if Stop command was received, indicating the node should shut down.
     pub async fn step(&mut self) -> Result<Option<NodeStatus<E::State>>> {
         // If force_host is enabled, only Host state is allowed
-        if self.config.force_host && !matches!(self.state, NodeState::Host { .. }) {
+        if self.config.force_host && !matches!(self.state, NodeStateInternal::Host { .. }) {
             return Err(ArenaError::Internal(
                 "force_host is enabled but node is not in Host state".to_string(),
             ));
@@ -140,14 +140,14 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                                 NodeCommand::GameAction(action) => {
                                     // Process action based on current state
                                     match &mut self.state {
-                                        NodeState::SearchingHost => {
+                                        NodeStateInternal::SearchingHost => {
                                             tracing::warn!(
                                                 "Node '{}' received action while searching for host, ignoring",
                                                 self.id
                                             );
                                             // Actions are ignored while searching for a host
                                         }
-                                        NodeState::Client { host_id } => {
+                                        NodeStateInternal::Client { host_id } => {
                                             tracing::debug!(
                                                 "Node '{}' forwarding action to host '{}'",
                                                 self.id,
@@ -156,7 +156,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                                             // TODO: Forward action to remote host via Zenoh pub/sub
                                             // Placeholder for Phase 4 implementation
                                         }
-                                        NodeState::Host { engine, .. } => {
+                                        NodeStateInternal::Host { engine, .. } => {
                                             tracing::debug!(
                                                 "Node '{}' processing action in host mode",
                                                 self.id
@@ -182,11 +182,11 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         
         // Build the node state info
         let state_info = match &self.state {
-            NodeState::SearchingHost => NodeStateInfo::SearchingHost,
-            NodeState::Client { host_id } => NodeStateInfo::Client {
+            NodeStateInternal::SearchingHost => NodeState::SearchingHost,
+            NodeStateInternal::Client { host_id } => NodeState::Client {
                 host_id: host_id.clone(),
             },
-            NodeState::Host { is_accepting, connected_clients, .. } => NodeStateInfo::Host {
+            NodeStateInternal::Host { is_accepting, connected_clients, .. } => NodeState::Host {
                 is_accepting: *is_accepting,
                 connected_clients: connected_clients.clone(),
             },
@@ -392,7 +392,7 @@ mod tests {
         
         let (node, _command_tx) = Node::new(config, session, get_engine).await.unwrap();
         // Node should be in Host state when force_host is true
-        assert!(matches!(node.state, NodeState::Host { .. }));
+        assert!(matches!(node.state, NodeStateInternal::Host { .. }));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -403,7 +403,7 @@ mod tests {
         
         let (node, _command_tx) = Node::new(config, session, get_engine).await.unwrap();
         // Node should be in SearchingHost state by default
-        assert!(matches!(node.state, NodeState::SearchingHost));
+        assert!(matches!(node.state, NodeStateInternal::SearchingHost));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
