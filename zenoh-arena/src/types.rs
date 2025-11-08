@@ -83,9 +83,9 @@ pub struct NodeInfo {
     pub connected_since: Instant,
 }
 
-/// Current state of the Arena
+/// Current state of a Node
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ArenaState {
+pub enum NodeState {
     /// Initializing
     Initializing,
 
@@ -93,7 +93,7 @@ pub enum ArenaState {
     SearchingHost,
 
     /// Connected as client to a host
-    ConnectedClient {
+    Client {
         /// ID of the host we're connected to
         host_id: NodeId,
     },
@@ -101,7 +101,7 @@ pub enum ArenaState {
     /// Acting as host
     Host {
         /// Whether accepting new clients
-        is_open: bool,
+        is_accepting: bool,
         /// List of connected client IDs
         connected_clients: Vec<NodeId>,
     },
@@ -113,37 +113,34 @@ pub enum ArenaState {
     Stopped,
 }
 
-impl ArenaState {
+impl NodeState {
     /// Check if currently in host mode
     pub fn is_host(&self) -> bool {
-        matches!(self, ArenaState::Host { .. })
+        matches!(self, NodeState::Host { .. })
     }
 
     /// Check if currently in client mode
     pub fn is_client(&self) -> bool {
-        matches!(self, ArenaState::ConnectedClient { .. })
-    }
-
-    /// Check if host mode with no clients
-    pub fn is_empty_host(&self) -> bool {
-        matches!(
-            self,
-            ArenaState::Host {
-                connected_clients,
-                ..
-            } if connected_clients.is_empty()
-        )
+        matches!(self, NodeState::Client { .. })
     }
 
     /// Check if host mode and accepting clients
-    pub fn is_open_host(&self) -> bool {
+    pub fn is_accepting_clients(&self) -> bool {
         matches!(
             self,
-            ArenaState::Host {
-                is_open: true,
+            NodeState::Host {
+                is_accepting: true,
                 ..
             }
         )
+    }
+
+    /// Get number of connected clients (0 if not host)
+    pub fn client_count(&self) -> usize {
+        match self {
+            NodeState::Host { connected_clients, .. } => connected_clients.len(),
+            _ => 0,
+        }
     }
 }
 

@@ -4,14 +4,15 @@
 //!
 //! ## Overview
 //!
-//! The `zenoh-arena` library provides automatic host/client role negotiation, connection
-//! management, and state synchronization for distributed game sessions using Zenoh's
-//! pub/sub and query/queryable APIs.
+//! The `zenoh-arena` library provides a Node-centric architecture where each node manages
+//! its own role (host or client), handles discovery, connection management, and state
+//! synchronization for distributed game sessions using Zenoh's pub/sub and query/queryable APIs.
 //!
 //! ## Key Features
 //!
+//! - Autonomous node behavior - no central coordinator
 //! - Automatic host discovery and connection
-//! - Host/client role negotiation
+//! - Host/client role management and transitions
 //! - Game state synchronization via pub/sub
 //! - Liveliness tracking for connection monitoring
 //! - Support for custom game engines via trait
@@ -19,12 +20,12 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use zenoh_arena::{ArenaConfig, NodeId};
+//! use zenoh_arena::{NodeConfig, NodeId};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Create configuration
-//!     let config = ArenaConfig::default();
+//!     let config = NodeConfig::default();
 //!     
 //!     // Generate a node ID
 //!     let node_id = NodeId::generate();
@@ -41,7 +42,7 @@ pub mod node;
 pub mod types;
 
 // Re-exports for convenience
-pub use config::ArenaConfig;
+pub use config::NodeConfig;
 pub use error::{ArenaError, Result};
 pub use node::Node;
-pub use types::{ArenaState, NodeId, NodeInfo, NodeRole, StateUpdate};
+pub use types::{NodeId, NodeInfo, NodeRole, NodeState, StateUpdate};

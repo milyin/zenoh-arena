@@ -1,9 +1,9 @@
-/// Configuration for the Arena
+/// Configuration for a Node
 use crate::types::NodeId;
 
-/// Main configuration for the Arena
+/// Main configuration for a Node
 #[derive(Debug, Clone)]
-pub struct ArenaConfig {
+pub struct NodeConfig {
     /// Optional node name (auto-generated if None)
     pub node_name: Option<String>,
 
@@ -26,7 +26,7 @@ pub struct ArenaConfig {
     pub keyexpr_prefix: String,
 }
 
-impl Default for ArenaConfig {
+impl Default for NodeConfig {
     fn default() -> Self {
         Self {
             node_name: None,
@@ -40,7 +40,7 @@ impl Default for ArenaConfig {
     }
 }
 
-impl ArenaConfig {
+impl NodeConfig {
     /// Create a new configuration with default values
     pub fn new() -> Self {
         Self::default()
