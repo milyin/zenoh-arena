@@ -1,5 +1,5 @@
 [workspace]
-members = ["zenoh-arena", "z_tetris"]
+members = ["zenoh-arena", "z_bonjour", "z_tetris"]
 resolver = "2"
 
 [workspace.package]

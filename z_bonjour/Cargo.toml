@@ -1,0 +1,11 @@
+[package]
+name = "z_bonjour"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+zenoh-arena = { path = "../zenoh-arena" }
+zenoh = { workspace = true }
+zenoh-ext = { workspace = true }
+tokio = { workspace = true }
+tracing-subscriber = "0.3"

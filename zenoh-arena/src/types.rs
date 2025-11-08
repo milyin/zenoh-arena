@@ -102,6 +102,31 @@ pub enum NodeState {
     },
 }
 
+impl std::fmt::Display for NodeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeState::SearchingHost => write!(f, "Searching for host..."),
+            NodeState::Client { host_id } => write!(f, "Connected as client to host: {}", host_id),
+            NodeState::Host {
+                is_accepting,
+                connected_clients,
+            } => {
+                let accepting_str = if *is_accepting { "open" } else { "closed" };
+                if connected_clients.is_empty() {
+                    write!(f, "Host mode ({}, no clients)", accepting_str)
+                } else {
+                    write!(
+                        f,
+                        "Host mode ({}, {} client(s))",
+                        accepting_str,
+                        connected_clients.len()
+                    )
+                }
+            }
+        }
+    }
+}
+
 /// Status returned by Node::step() method
 #[derive(Debug, Clone)]
 pub struct NodeStatus<S> {
@@ -109,6 +134,16 @@ pub struct NodeStatus<S> {
     pub state: NodeState,
     /// Current game state (if available)
     pub game_state: Option<S>,
+}
+
+impl<S: std::fmt::Display> std::fmt::Display for NodeStatus<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[State] {}", self.state)?;
+        if let Some(ref game_state) = self.game_state {
+            write!(f, " | Game: {}", game_state)?;
+        }
+        Ok(())
+    }
 }
 
 /// Current state of a Node (internal)
@@ -189,5 +224,70 @@ impl<E> From<&NodeStateInternal<E>> for NodeState {
                 connected_clients: connected_clients.clone(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_node_state_display_searching() {
+        let state = NodeState::SearchingHost;
+        assert_eq!(format!("{}", state), "Searching for host...");
+    }
+
+    #[test]
+    fn test_node_state_display_client() {
+        let host_id = NodeId::from_name("test_host".to_string()).unwrap();
+        let state = NodeState::Client { host_id };
+        assert_eq!(format!("{}", state), "Connected as client to host: test_host");
+    }
+
+    #[test]
+    fn test_node_state_display_host_empty() {
+        let state = NodeState::Host {
+            is_accepting: true,
+            connected_clients: vec![],
+        };
+        assert_eq!(format!("{}", state), "Host mode (open, no clients)");
+    }
+
+    #[test]
+    fn test_node_state_display_host_closed() {
+        let state = NodeState::Host {
+            is_accepting: false,
+            connected_clients: vec![],
+        };
+        assert_eq!(format!("{}", state), "Host mode (closed, no clients)");
+    }
+
+    #[test]
+    fn test_node_state_display_host_with_clients() {
+        let client1 = NodeId::from_name("client1".to_string()).unwrap();
+        let client2 = NodeId::from_name("client2".to_string()).unwrap();
+        let state = NodeState::Host {
+            is_accepting: true,
+            connected_clients: vec![client1, client2],
+        };
+        assert_eq!(format!("{}", state), "Host mode (open, 2 client(s))");
+    }
+
+    #[test]
+    fn test_node_status_display_no_game_state() {
+        let status: NodeStatus<String> = NodeStatus {
+            state: NodeState::SearchingHost,
+            game_state: None,
+        };
+        assert_eq!(format!("{}", status), "[State] Searching for host...");
+    }
+
+    #[test]
+    fn test_node_status_display_with_game_state() {
+        let status: NodeStatus<String> = NodeStatus {
+            state: NodeState::SearchingHost,
+            game_state: Some("Level 5".to_string()),
+        };
+        assert_eq!(format!("{}", status), "[State] Searching for host... | Game: Level 5");
     }
 }
