@@ -90,10 +90,11 @@ zenoh-arena/             (workspace root)
 │   │   ├── client.rs           // Client role implementation
 │   │   ├── network/
 │   │   │   ├── mod.rs          // Network layer coordinator
-│   │   │   ├── discovery.rs    // Host discovery using Queryable
-│   │   │   ├── connection.rs   // Connection management
+│   │   │   ├── discovery.rs    // Host discovery using Queryable/get()
+│   │   │   ├── connection.rs   // Connection handshake (Query/Reply)
 │   │   │   ├── liveliness.rs   // Liveliness token management
-│   │   │   └── transport.rs    // Message serialization/transport
+│   │   │   ├── pubsub.rs       // Publisher/Subscriber setup
+│   │   │   └── serialization.rs // Zenoh serialization helpers
 │   │   ├── engine/
 │   │   │   ├── mod.rs          // Game engine integration
 │   │   │   └── adapter.rs      // Engine adapter trait
@@ -330,15 +331,110 @@ pub struct StateUpdate<T> {
 }
 ```
 
-### Network Protocol
+### Network Protocol & Data Transmission
+
+The library uses Zenoh's pub/sub API for game data transmission:
+
+#### Discovery & Connection (Query/Queryable)
+- **Host**: Declares `Queryable` on `<prefix>/discovery` to respond to discovery queries
+- **Client**: Uses `get()` to query for available hosts
+- **Connection handshake**: Query/reply pattern for join request/accept/confirm
+
+#### Game Data Flow (Pub/Sub)
+
+**Actions (Client → Host)**:
+```rust
+// Client side: Publisher for actions
+// Publishes to: <prefix>/host/<host_id>/client/<client_id>/action
+let action_publisher = session
+    .declare_publisher(format!("{}/host/{}/client/{}/action", prefix, host_id, client_id))
+    .await?;
+
+// Host side: Subscriber for all client actions
+// Subscribes to: <prefix>/host/<host_id>/client/*/action
+let action_subscriber = session
+    .declare_subscriber(format!("{}/host/{}/client/*/action", prefix, host_id))
+    .await?;
+
+// Host receives actions from all clients
+while let Ok(sample) = action_subscriber.recv_async().await {
+    let action: Action = zenoh_ext::z_deserialize(sample.payload())?;
+    let client_id = extract_client_id_from_keyexpr(sample.key_expr());
+    engine.process_action(action, &client_id)?;
+}
+```
+
+**States (Host → Clients)**:
+```rust
+// Host side: Publisher for state updates
+// Publishes to: <prefix>/host/<host_id>/state
+let state_publisher = session
+    .declare_publisher(format!("{}/host/{}/state", prefix, host_id))
+    .await?;
+
+// Broadcast state to all clients
+let state = engine.current_state();
+let payload = zenoh_ext::z_serialize(&state)?;
+state_publisher.put(payload).await?;
+
+// Client side: Subscriber for state updates
+// Subscribes to: <prefix>/host/<host_id>/state
+let state_subscriber = session
+    .declare_subscriber(format!("{}/host/{}/state", prefix, host_id))
+    .await?;
+
+// Client receives state updates from host
+while let Ok(sample) = state_subscriber.recv_async().await {
+    let state: State = zenoh_ext::z_deserialize(sample.payload())?;
+    // Forward to application via flume channel
+    state_channel.send(state)?;
+}
+```
+
+#### Key Expression Patterns
 
 ```rust
-/// Internal network message types
-/// Note: Implements zenoh_ext::Serialize and zenoh_ext::Deserialize
+/// Key expression patterns
+/// 
+/// Note: NodeId is guaranteed to be a valid single-chunk keyexpr,
+/// so it can be safely used in keyexpr construction via format/join
+struct KeyExpressions {
+    /// Discovery: <prefix>/discovery
+    discovery: String,
+    
+    /// Host-specific: <prefix>/host/<host_id>
+    host: String,
+    
+    /// Host join query: <prefix>/host/<host_id>/join
+    host_join: String,
+    
+    /// Host state pub/sub: <prefix>/host/<host_id>/state
+    host_state: String,
+    
+    /// Client action pub/sub: <prefix>/host/<host_id>/client/<client_id>/action
+    client_action: String,
+    
+    /// Liveliness token keyexpr: <prefix>/node/<node_id>
+    /// Note: Liveliness tokens are stored in Zenoh's hermetic @ namespace
+    /// automatically by the liveliness API, separate from regular pub/sub data.
+    /// We use a regular keyexpr which Zenoh internally maps to @<keyexpr>
+    liveliness: String,
+}
+
+impl KeyExpressions {
+    /// Create keyexpr patterns using zenoh::key_expr::KeyExpr::join
+    /// Since NodeId is validated as single-chunk keyexpr, joining is safe
+    fn new(prefix: &str, node_id: &NodeId) -> Result<Self, ArenaError>;
+}
+```
+
+#### Connection Messages (Query/Reply)
+
+```rust
+/// Messages used during discovery and connection (Query/Reply pattern)
 #[derive(Debug, Clone)]
-enum NetworkMessage<Action, State> 
+enum ConnectionMessage<State> 
 where
-    Action: zenoh_ext::Serialize + zenoh_ext::Deserialize,
     State: zenoh_ext::Serialize + zenoh_ext::Deserialize,
 {
     /// Client -> Host: Request to join
@@ -346,7 +442,7 @@ where
         client_id: NodeId,
     },
     
-    /// Host -> Client: Accept join request
+    /// Host -> Client: Accept join request with initial state
     JoinAccept {
         host_id: NodeId,
         initial_state: State,
@@ -363,23 +459,6 @@ where
         client_id: NodeId,
     },
     
-    /// Client -> Host: Game action
-    Action {
-        client_id: NodeId,
-        action: Action,
-    },
-    
-    /// Host -> Clients: Game state update
-    StateUpdate {
-        state: State,
-        timestamp: u64,
-    },
-    
-    /// Either -> Either: Disconnect notification
-    Disconnect {
-        node_id: NodeId,
-    },
-    
     /// Client -> Hosts: Discovery query
     DiscoveryQuery,
     
@@ -391,40 +470,14 @@ where
         max_clients: Option<usize>,
     },
 }
-
-/// Key expression patterns
-/// 
-/// Note: NodeId is guaranteed to be a valid single-chunk keyexpr,
-/// so it can be safely used in keyexpr construction via format/join
-struct KeyExpressions {
-    /// Discovery: <prefix>/discovery
-    discovery: String,
-    
-    /// Host-specific: <prefix>/host/<host_id>
-    host: String,
-    
-    /// Host join: <prefix>/host/<host_id>/join
-    host_join: String,
-    
-    /// Host state: <prefix>/host/<host_id>/state
-    host_state: String,
-    
-    /// Client-specific: <prefix>/host/<host_id>/client/<client_id>
-    client: String,
-    
-    /// Liveliness token keyexpr: <prefix>/node/<node_id>
-    /// Note: Liveliness tokens are stored in Zenoh's hermetic @ namespace
-    /// automatically by the liveliness API, separate from regular pub/sub data.
-    /// We use a regular keyexpr which Zenoh internally maps to @<keyexpr>
-    liveliness: String,
-}
-
-impl KeyExpressions {
-    /// Create keyexpr patterns using zenoh::key_expr::KeyExpr::join
-    /// Since NodeId is validated as single-chunk keyexpr, joining is safe
-    fn new(prefix: &str, node_id: &NodeId) -> Result<Self, ArenaError>;
-}
 ```
+
+**Data Flow Summary**:
+1. **Discovery**: Client uses Zenoh `get()` (query) to find hosts via `Queryable`
+2. **Connection**: Request/Accept/Confirm handshake via query/reply
+3. **Game Actions**: Clients publish actions, host subscribes with wildcard pattern
+4. **Game States**: Host publishes states, all clients subscribe
+5. **Liveliness**: Automatic tracking via Zenoh liveliness API
 
 ### Error Handling
 
@@ -483,13 +536,14 @@ pub type Result<T> = std::result::Result<T, ArenaError>;
 - [ ] Zenoh session initialization
 
 ### Phase 2: Network Layer
-- [ ] Key expression management
-- [ ] Message serialization/deserialization
+- [ ] Key expression management and construction
+- [ ] Message serialization/deserialization (zenoh-ext)
+- [ ] Publisher/Subscriber setup for actions and states
 - [ ] Liveliness token management
-- [ ] Basic put/get operations
+- [ ] Query/Queryable for discovery
 
 ### Phase 3: Discovery & Connection
-- [ ] Host discovery using Queryable
+- [ ] Host discovery using Queryable/get()
 - [ ] Client join protocol
 - [ ] Connection confirmation
 - [ ] Host acceptance logic
@@ -561,11 +615,33 @@ pub type Result<T> = std::result::Result<T, ArenaError>;
 - Engine runs on host only, isolated from network layer
 
 ### 6. Discovery Protocol
-- Use Zenoh Queryable for host discovery
-- Randomized timeout prevents thundering herd
-- Two-phase commit: request -> accept -> confirm
 
-### 7. Liveliness
+- Use Zenoh Queryable for host discovery
+- Clients use `get()` to query available hosts
+- Randomized timeout prevents thundering herd
+- Connection handshake: Query/reply pattern for join request/accept/confirm
+
+### 7. Game Data Transmission
+
+**Actions (Client → Host)**:
+- Each client declares a Publisher on `<prefix>/host/<host_id>/client/<client_id>/action`
+- Host declares a Subscriber with wildcard `<prefix>/host/<host_id>/client/*/action`
+- Host receives all client actions through single subscriber
+- Actions are deserialized and forwarded to game engine
+
+**States (Host → Clients)**:
+- Host declares a Publisher on `<prefix>/host/<host_id>/state`
+- Each client declares a Subscriber on `<prefix>/host/<host_id>/state`
+- Host broadcasts state updates to all connected clients
+- Clients receive states and forward to application via flume channels
+
+**Benefits**:
+- Efficient multicast distribution of state updates
+- Scalable action collection from multiple clients
+- Low-latency pub/sub pattern
+- Automatic Zenoh routing optimization
+
+### 8. Liveliness
 
 - Each node declares a liveliness token using `session.liveliness().declare_token(keyexpr)`
 - Liveliness tokens are automatically stored in Zenoh's hermetic `@` namespace
