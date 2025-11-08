@@ -41,7 +41,7 @@
 //!     let session = zenoh::open(zenoh::Config::default()).await.unwrap();
 //!     
 //!     // Declare an arena node using the extension trait
-//!     let (node, sender) = session
+//!     let node = session
 //!         .declare_arena_node(|| MyEngine)
 //!         .name("my_node".to_string())
 //!         .force_host(true)

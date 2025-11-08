@@ -1,6 +1,6 @@
 /// Extension trait for zenoh::Session to declare arena nodes
 use crate::config::NodeConfig;
-use crate::node::{GameEngine, Node, NodeCommand};
+use crate::node::{GameEngine, Node};
 use crate::Result;
 use zenoh::Resolvable;
 
@@ -22,7 +22,7 @@ pub trait SessionExt {
     /// # }
     /// # async fn example() {
     /// let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-    /// let (node, sender) = session
+    /// let node = session
     ///     .declare_arena_node(|| MyEngine)
     ///     .await
     ///     .unwrap();
@@ -86,7 +86,7 @@ impl<'a, E: GameEngine, F: Fn() -> E> NodeBuilder<'a, E, F> {
 }
 
 impl<'a, E: GameEngine, F: Fn() -> E> Resolvable for NodeBuilder<'a, E, F> {
-    type To = Result<(Node<E, F>, flume::Sender<NodeCommand<E::Action>>)>;
+    type To = Result<Node<E, F>>;
 }
 
 impl<'a, E: GameEngine, F: Fn() -> E + Send + 'a> std::future::IntoFuture for NodeBuilder<'a, E, F> {

@@ -37,6 +37,9 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
 
     /// Receiver for commands from the application
     command_rx: flume::Receiver<NodeCommand<E::Action>>,
+
+    /// Sender for commands from the application
+    command_tx: flume::Sender<NodeCommand<E::Action>>,
 }
 
 impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
@@ -45,7 +48,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         config: NodeConfig,
         session: zenoh::Session,
         get_engine: F,
-    ) -> Result<(Self, flume::Sender<NodeCommand<E::Action>>)> {
+    ) -> Result<Self> {
         // Create or validate node ID
         let id = match &config.node_name {
             Some(name) => NodeId::from_name(name.clone())?,
@@ -77,9 +80,10 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             session: Arc::new(session),
             get_engine,
             command_rx,
+            command_tx,
         };
 
-        Ok((node, command_tx))
+        Ok(node)
     }
 
     /// Get node ID
@@ -90,6 +94,11 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Get reference to Zenoh session
     pub fn session(&self) -> &Arc<zenoh::Session> {
         &self.session
+    }
+
+    /// Get a sender for sending commands to this node
+    pub fn sender(&self) -> flume::Sender<NodeCommand<E::Action>> {
+        self.command_tx.clone()
     }
 
     /// Execute one step of the node state machine
@@ -256,7 +265,7 @@ mod tests {
         let result = session.declare_arena_node(get_engine).await;
         assert!(result.is_ok());
 
-        let (node, _command_tx) = result.unwrap();
+        let node = result.unwrap();
         assert!(!node.id().as_str().is_empty());
     }
 
@@ -273,7 +282,7 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        let (node, _command_tx) = result.unwrap();
+        let node = result.unwrap();
         assert_eq!(node.id().as_str(), "my_custom_node");
     }
 
@@ -304,11 +313,13 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let (mut node, command_tx) = session
+        let mut node = session
             .declare_arena_node(get_engine)
             .force_host(true)
             .await
             .unwrap();
+
+        let command_tx = node.sender();
 
         // Spawn step loop in background
         let step_handle = tokio::spawn(async move {
@@ -340,7 +351,7 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let (node, _command_tx) = session
+        let node = session
             .declare_arena_node(get_engine)
             .force_host(true)
             .await
@@ -356,7 +367,7 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let (node, _command_tx) = session
+        let node = session
             .declare_arena_node(get_engine)
             .await
             .unwrap();
@@ -371,12 +382,14 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let (mut node, command_tx) = session
+        let mut node = session
             .declare_arena_node(get_engine)
             .force_host(true)
             .step_timeout_ms(50)
             .await
             .unwrap();
+
+        let command_tx = node.sender();
 
         // Send some game actions
         command_tx.send(NodeCommand::GameAction(42)).unwrap();
@@ -405,7 +418,7 @@ mod tests {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
 
         // Use the extension trait to declare a node
-        let (node, sender) = session
+        let node = session
             .declare_arena_node(|| TestEngine)
             .force_host(true)
             .name("test_node".to_string())
@@ -416,7 +429,8 @@ mod tests {
         // Verify the node was created correctly
         assert_eq!(node.id().as_str(), "test_node");
 
-        // Send an action and verify it works
+        // Get the sender and send an action to verify it works
+        let sender = node.sender();
         sender
             .send_async(NodeCommand::GameAction(42))
             .await
