@@ -2,7 +2,7 @@
 
 /// Main configuration for a Node
 #[derive(Debug, Clone)]
-pub struct NodeConfig {
+pub(crate) struct NodeConfig {
     /// Optional node name (auto-generated if None)
     pub node_name: Option<String>,
 

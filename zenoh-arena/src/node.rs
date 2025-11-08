@@ -40,14 +40,8 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
 }
 
 impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
-    /// Create a new Node instance
-    ///
-    /// Returns a tuple of (Node, command_sender) where command_sender is used by the
-    /// application to send commands (game actions or control commands) to the node.
-    ///
-    /// `get_engine` is a factory function that creates an engine when needed
-    /// `session` is a Zenoh session that will be owned by the Node
-    pub async fn new(
+    /// Create a new Node instance (internal use only - use builder pattern via SessionExt)
+    pub(crate) async fn new_internal(
         config: NodeConfig,
         session: zenoh::Session,
         get_engine: F,
@@ -254,11 +248,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
-        let config = NodeConfig::default();
+        use crate::session_ext::SessionExt;
+        
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let result = Node::new(config, session, get_engine).await;
+        let result = session.declare_arena_node(get_engine).await;
         assert!(result.is_ok());
 
         let (node, _command_tx) = result.unwrap();
@@ -267,11 +262,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_custom_name() {
-        let config = NodeConfig::default().with_node_name("my_custom_node".to_string());
+        use crate::session_ext::SessionExt;
+        
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let result = Node::new(config, session, get_engine).await;
+        let result = session
+            .declare_arena_node(get_engine)
+            .name("my_custom_node".to_string())
+            .await;
         assert!(result.is_ok());
 
         let (node, _command_tx) = result.unwrap();
@@ -280,11 +279,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_invalid_name() {
-        let config = NodeConfig::default().with_node_name("invalid/name".to_string());
+        use crate::session_ext::SessionExt;
+        
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let result = Node::new(config, session, get_engine).await;
+        let result = session
+            .declare_arena_node(get_engine)
+            .name("invalid/name".to_string())
+            .await;
         assert!(result.is_err());
         if let Err(e) = result {
             match e {
@@ -296,11 +299,16 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_step_with_force_host() {
-        let config = NodeConfig::default().with_force_host(true);
+        use crate::session_ext::SessionExt;
+        
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let (mut node, command_tx) = Node::new(config, session, get_engine).await.unwrap();
+        let (mut node, command_tx) = session
+            .declare_arena_node(get_engine)
+            .force_host(true)
+            .await
+            .unwrap();
 
         // Spawn step loop in background
         let step_handle = tokio::spawn(async move {
@@ -327,35 +335,48 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_force_host_starts_in_host_state() {
-        let config = NodeConfig::default().with_force_host(true);
+        use crate::session_ext::SessionExt;
+        
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let (node, _command_tx) = Node::new(config, session, get_engine).await.unwrap();
+        let (node, _command_tx) = session
+            .declare_arena_node(get_engine)
+            .force_host(true)
+            .await
+            .unwrap();
         // Node should be in Host state when force_host is true
         assert!(matches!(node.state, NodeStateInternal::Host { .. }));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
-        let config = NodeConfig::default(); // force_host = false by default
+        use crate::session_ext::SessionExt;
+        
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let (node, _command_tx) = Node::new(config, session, get_engine).await.unwrap();
+        let (node, _command_tx) = session
+            .declare_arena_node(get_engine)
+            .await
+            .unwrap();
         // Node should be in SearchingHost state by default
         assert!(matches!(node.state, NodeStateInternal::SearchingHost));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
-        let config = NodeConfig::default()
-            .with_force_host(true)
-            .with_step_timeout_ms(50);
+        use crate::session_ext::SessionExt;
+        
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let (mut node, command_tx) = Node::new(config, session, get_engine).await.unwrap();
+        let (mut node, command_tx) = session
+            .declare_arena_node(get_engine)
+            .force_host(true)
+            .step_timeout_ms(50)
+            .await
+            .unwrap();
 
         // Send some game actions
         command_tx.send(NodeCommand::GameAction(42)).unwrap();

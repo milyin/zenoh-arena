@@ -10,7 +10,7 @@ pub trait SessionExt {
     ///
     /// # Example
     /// ```no_run
-    /// use zenoh_arena::{SessionExt, NodeConfig, GameEngine};
+    /// use zenoh_arena::{SessionExt, GameEngine};
     ///
     /// # struct MyEngine;
     /// # impl GameEngine for MyEngine {
@@ -91,13 +91,13 @@ impl<'a, E: GameEngine, F: Fn() -> E> Resolvable for NodeBuilder<'a, E, F> {
 
 impl<'a, E: GameEngine, F: Fn() -> E> Wait for NodeBuilder<'a, E, F> {
     fn wait(self) -> <Self as Resolvable>::To {
-        // We need to block on the async Node::new() method
+        // We need to block on the async Node::new_internal() method
         // This is necessary because Wait::wait() is not async
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                // Clone the session since Node::new takes ownership
+                // Clone the session since Node::new_internal takes ownership
                 let session = self.session.clone();
-                Node::new(self.config, session, self.get_engine).await
+                Node::new_internal(self.config, session, self.get_engine).await
             })
         })
     }
@@ -111,9 +111,9 @@ impl<'a, E: GameEngine, F: Fn() -> E + Send + 'a> std::future::IntoFuture for No
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
-            // Clone the session since Node::new takes ownership
+            // Clone the session since Node::new_internal takes ownership
             let session = self.session.clone();
-            Node::new(self.config, session, self.get_engine).await
+            Node::new_internal(self.config, session, self.get_engine).await
         })
     }
 }

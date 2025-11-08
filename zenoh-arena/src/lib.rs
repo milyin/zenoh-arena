@@ -60,7 +60,6 @@ pub mod session_ext;
 pub mod types;
 
 // Re-exports for convenience
-pub use config::NodeConfig;
 pub use error::{ArenaError, Result};
 pub use node::{GameEngine, Node, NodeCommand};
 pub use session_ext::{NodeBuilder, SessionExt};
