@@ -1,6 +1,15 @@
 [package]
 name = "zenoh-arena"
-edition = "2024"
 version.workspace = true
+edition.workspace = true
 
 [dependencies]
+zenoh = { workspace = true }
+zenoh-ext = { workspace = true }
+tokio = { workspace = true }
+flume = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+bs58 = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }

@@ -28,7 +28,7 @@ There are the following API surfaces (`framework` is the zenoh-arena library)
 
 - framework <-> game engine. When framework is in host mode, it starts game engine instance. It forward ACTIONs to it and distributes STATEs to connected clients.
 
-- framework <-> framework. This API is internal, it's how nodes connects to each other using zenoh network API
+- framework <-> framework. This API is internal, it's how nodes connects to each other using zenoh network API.
 
 # z_tetris application
 

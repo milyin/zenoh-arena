@@ -1,14 +1,47 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # zenoh-arena
+//!
+//! A peer-to-peer network framework for simple game applications built on top of Zenoh.
+//!
+//! ## Overview
+//!
+//! The `zenoh-arena` library provides automatic host/client role negotiation, connection
+//! management, and state synchronization for distributed game sessions using Zenoh's
+//! pub/sub and query/queryable APIs.
+//!
+//! ## Key Features
+//!
+//! - Automatic host discovery and connection
+//! - Host/client role negotiation
+//! - Game state synchronization via pub/sub
+//! - Liveliness tracking for connection monitoring
+//! - Support for custom game engines via trait
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use zenoh_arena::{ArenaConfig, NodeId};
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create configuration
+//!     let config = ArenaConfig::default();
+//!     
+//!     // Generate a node ID
+//!     let node_id = NodeId::generate();
+//!     println!("Node ID: {}", node_id);
+//!     
+//!     Ok(())
+//! }
+//! ```
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// Module declarations
+pub mod config;
+pub mod error;
+pub mod node;
+pub mod types;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// Re-exports for convenience
+pub use config::ArenaConfig;
+pub use error::{ArenaError, Result};
+pub use node::Node;
+pub use types::{ArenaState, NodeId, NodeInfo, NodeRole, StateUpdate};

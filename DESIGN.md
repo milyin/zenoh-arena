@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `zenoh-arena` library is a peer-to-peer network framework for simple game applications built on top of the Zenoh network library. It provides automatic host/client role negotiation, connection management, and state synchronization for distributed game sessions.
+The `zenoh-arena` library is a peer-to-peer network framework for simple game applications built on top of the Zenoh network library. It provides a `Node`-centric architecture where each node manages its own role (host or client), handles discovery, connection management, and state synchronization for distributed game sessions. There is no central "Arena" coordinator - each node is autonomous and manages its local view of the network.
 
 ## Important Design Constraints
 
@@ -38,37 +38,51 @@ This ensures complete isolation between application data and liveliness tracking
 
 ## Core Concepts
 
-### Application Roles
+### Node Roles
 
-- **Client**: Searches for available hosts and connects to them
-- **Host**: Accepts client connections and runs the game engine
-- **Empty Host**: A host with no connected clients
-- **Open Host**: A host accepting new client connections
-- **Closed Host**: A host that has stopped accepting new clients
+Each `Node` operates in one of two modes:
 
-### State Transitions
+- **Client Mode**: Node searches for available hosts, connects to one, sends actions, receives game state
+- **Host Mode**: Node runs the game engine, accepts client connections, processes actions, broadcasts state
 
+### Node Behavior
+
+**As Client:**
+- Discovers available hosts via Zenoh query
+- Chooses and connects to a host
+- Publishes actions to host
+- Subscribes to state updates from host
+- Monitors host liveliness
+- Reconnects or becomes host if current host disconnects
+
+**As Host:**
+- Declares queryable for discovery
+- Accepts/rejects client join requests
+- Subscribes to actions from all clients (wildcard pattern)
+- Processes actions through game engine
+- Publishes state updates to all clients
+- Manages client lifecycle (connections/disconnections)
+- Declares liveliness token
+
+**Role Transitions:**
 ```
-Initial State (Client)
+Node Start (no preference)
     |
     v
-Searching for Hosts
+Search for Hosts
     |
-    ├─> Host Found ──> Connected Client
-    |                       |
-    |                       v
-    |                  (On disconnect/loss)
-    |                       |
-    └─> No Hosts Found ─────┴──> Become Host
-                                      |
-                                      v
-                                 Open/Closed Host
-                                      |
-                                      v
-                            (On session end/empty/request)
-                                      |
-                                      v
-                                Back to Searching
+    ├─> Host Found ──> Become Client ──> (Monitor host liveness)
+    |                                              |
+    |                                              v
+    |                                    (Host disconnects)
+    |                                              |
+    └─> No Hosts Found ─────────────────┴────> Become Host
+                                                    |
+                                                    v
+                                        (Session ends or manual stop)
+                                                    |
+                                                    v
+                                              Back to Search
 ```
 
 ## Architecture
@@ -82,22 +96,17 @@ zenoh-arena/             (workspace root)
 │   ├── Cargo.toml
 │   ├── src/
 │   │   ├── lib.rs              // Public API and re-exports
-│   │   ├── config.rs           // Configuration types
-│   │   ├── types.rs            // Core types and traits
-│   │   ├── arena.rs            // Main Arena coordinator
-│   │   ├── node.rs             // Node identity and state
-│   │   ├── host.rs             // Host role implementation
-│   │   ├── client.rs           // Client role implementation
+│   │   ├── config.rs           // Configuration types  
+│   │   ├── types.rs            // Core types (NodeId, NodeInfo, NodeRole, StateUpdate)
+│   │   ├── node.rs             // Node - main interface for host/client behavior
+│   │   ├── engine.rs           // GameEngine trait
 │   │   ├── network/
 │   │   │   ├── mod.rs          // Network layer coordinator
+│   │   │   ├── keyexpr.rs      // Key expression builder
 │   │   │   ├── discovery.rs    // Host discovery using Queryable/get()
 │   │   │   ├── connection.rs   // Connection handshake (Query/Reply)
 │   │   │   ├── liveliness.rs   // Liveliness token management
-│   │   │   ├── pubsub.rs       // Publisher/Subscriber setup
-│   │   │   └── serialization.rs // Zenoh serialization helpers
-│   │   ├── engine/
-│   │   │   ├── mod.rs          // Game engine integration
-│   │   │   └── adapter.rs      // Engine adapter trait
+│   │   │   └── pubsub.rs       // Publisher/Subscriber setup
 │   │   └── error.rs            // Error types
 ├── z_bonjour/          (minimal example for API verification)
 │   ├── Cargo.toml
@@ -111,11 +120,11 @@ zenoh-arena/             (workspace root)
 
 ## Basic Types
 
-### Core Configuration
+### Node Configuration
 
 ```rust
-/// Main configuration for the Arena
-pub struct ArenaConfig {
+/// Configuration for a Node
+pub struct NodeConfig {
     /// Optional node name (auto-generated if None)
     pub node_name: Option<String>,
     
@@ -138,7 +147,7 @@ pub struct ArenaConfig {
     pub keyexpr_prefix: String,
 }
 
-impl Default for ArenaConfig {
+impl Default for NodeConfig {
     fn default() -> Self {
         Self {
             node_name: None,
@@ -196,12 +205,12 @@ pub enum NodeRole {
 }
 ```
 
-### Application State
+### Node State
 
 ```rust
-/// Current state of the Arena
+/// Current state of a Node
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ArenaState {
+pub enum NodeState {
     /// Initializing
     Initializing,
     
@@ -209,11 +218,13 @@ pub enum ArenaState {
     SearchingHost,
     
     /// Connected as client to a host
-    ConnectedClient { host_id: NodeId },
+    Client { 
+        host_id: NodeId,
+    },
     
     /// Acting as host
     Host {
-        is_open: bool,
+        is_accepting: bool,
         connected_clients: Vec<NodeId>,
     },
     
@@ -224,11 +235,11 @@ pub enum ArenaState {
     Stopped,
 }
 
-impl ArenaState {
+impl NodeState {
     pub fn is_host(&self) -> bool;
     pub fn is_client(&self) -> bool;
-    pub fn is_empty_host(&self) -> bool;
-    pub fn is_open_host(&self) -> bool;
+    pub fn is_accepting_clients(&self) -> bool;
+    pub fn client_count(&self) -> usize;
 }
 ```
 
@@ -236,6 +247,8 @@ impl ArenaState {
 
 ```rust
 /// Trait for game engine integration
+/// 
+/// The engine runs only on the host node and processes actions from clients
 pub trait GameEngine: Send + Sync {
     /// Action type from user/client
     type Action: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send;
@@ -270,58 +283,69 @@ pub trait GameEngine: Send + Sync {
 }
 ```
 
-### Arena API
+### Node API
 
 ```rust
-/// Main Arena coordinator
-pub struct Arena<E: GameEngine> {
-    config: ArenaConfig,
-    state: Arc<RwLock<ArenaState>>,
-    node_id: NodeId,
+/// Main Node interface - manages host/client behavior and game sessions
+/// 
+/// A Node is autonomous and manages its own role, connections, and game state.
+/// There is no central "Arena" - each node has its local view of the network.
+pub struct Node<E: GameEngine> {
+    id: NodeId,
+    config: NodeConfig,
+    state: Arc<RwLock<NodeState>>,
+    session: Arc<zenoh::Session>,
     engine: Option<E>,
-    // Internal fields...
+    
+    // Internal network management
+    // (queryable, subscribers, publishers, liveliness tokens, etc.)
 }
 
-impl<E: GameEngine> Arena<E> {
-    /// Create a new Arena instance
-    pub async fn new(config: ArenaConfig, engine: E) -> Result<Self, ArenaError>;
+impl<E: GameEngine> Node<E> {
+    /// Create a new Node instance
+    /// 
+    /// `engine` is optional - only needed if node can become a host
+    pub async fn new(config: NodeConfig, engine: Option<E>) -> Result<Self, ArenaError>;
     
-    /// Start the arena (begins host discovery)
+    /// Start the node (begins host discovery or becomes host immediately)
     pub async fn start(&mut self) -> Result<(), ArenaError>;
     
-    /// Stop the arena
+    /// Stop the node
     pub async fn stop(&mut self) -> Result<(), ArenaError>;
     
-    /// Get current arena state
-    pub fn state(&self) -> ArenaState;
+    /// Get current node state
+    pub fn state(&self) -> NodeState;
     
     /// Get node ID
-    pub fn node_id(&self) -> &NodeId;
+    pub fn id(&self) -> &NodeId;
     
-    /// Send an action (as client or local processing)
+    /// Send an action (as client or local processing as host)
     pub async fn send_action(&self, action: E::Action) -> Result<(), ArenaError>;
     
-    /// Subscribe to state updates
+    /// Subscribe to game state updates
     pub fn subscribe_state(&self) -> StateReceiver<E::State>;
     
-    /// Subscribe to arena state changes
-    pub fn subscribe_arena_state(&self) -> ArenaStateReceiver;
+    /// Subscribe to node state changes
+    pub fn subscribe_node_state(&self) -> NodeStateReceiver;
     
-    /// Manually close host (if in host mode)
-    pub async fn close_host(&mut self) -> Result<(), ArenaError>;
+    /// Force role to host (if not already)
+    pub async fn become_host(&mut self) -> Result<(), ArenaError>;
     
-    /// Manually disconnect (if in client mode)
+    /// Disconnect from current host (if client)
     pub async fn disconnect(&mut self) -> Result<(), ArenaError>;
     
-    /// Set host open/closed status
-    pub async fn set_host_open(&mut self, open: bool) -> Result<(), ArenaError>;
+    /// Set whether host is accepting new clients (if host)
+    pub async fn set_accepting_clients(&mut self, accepting: bool) -> Result<(), ArenaError>;
+    
+    /// Kick a client (if host)
+    pub async fn kick_client(&mut self, client_id: &NodeId) -> Result<(), ArenaError>;
 }
 
 /// Receiver for game state updates (using flume, same as zenoh)
 pub type StateReceiver<T> = flume::Receiver<StateUpdate<T>>;
 
-/// Receiver for arena state changes (using flume, same as zenoh)
-pub type ArenaStateReceiver = flume::Receiver<ArenaState>;
+/// Receiver for node state changes (using flume, same as zenoh)
+pub type NodeStateReceiver = flume::Receiver<NodeState>;
 
 #[derive(Debug, Clone)]
 pub struct StateUpdate<T> {
@@ -495,8 +519,8 @@ pub enum ArenaError {
     
     #[error("Invalid state transition: from {from:?} to {to:?}")]
     InvalidStateTransition {
-        from: ArenaState,
-        to: ArenaState,
+        from: NodeState,
+        to: NodeState,
     },
     
     #[error("Host not found")]
@@ -536,29 +560,35 @@ pub type Result<T> = std::result::Result<T, ArenaError>;
 - [ ] Zenoh session initialization
 
 ### Phase 2: Network Layer
+
 - [ ] Key expression management and construction
 - [ ] Message serialization/deserialization (zenoh-ext)
 - [ ] Publisher/Subscriber setup for actions and states
 - [ ] Liveliness token management
 - [ ] Query/Queryable for discovery
 
-### Phase 3: Discovery & Connection
+### Phase 3: Node Discovery & Connection
+
 - [ ] Host discovery using Queryable/get()
 - [ ] Client join protocol
 - [ ] Connection confirmation
 - [ ] Host acceptance logic
+- [ ] Liveliness monitoring
 
-### Phase 4: Role Implementation
-- [ ] Client role implementation
+### Phase 4: Node Role Management
+
+- [ ] Client mode implementation
   - Host searching
   - Connection management
-  - Action forwarding
-  - State reception
-- [ ] Host role implementation
-  - Queryable setup
+  - Action publishing
+  - State subscription
+  - Host liveliness monitoring
+- [ ] Host mode implementation
+  - Discovery queryable setup
   - Client management
   - Engine coordination
   - State broadcasting
+  - Action subscription (wildcard pattern)
 
 ### Phase 5: State Transitions
 - [ ] Automatic role switching
@@ -653,10 +683,9 @@ pub type Result<T> = std::result::Result<T, ArenaError>;
 **Important**: The liveliness API abstracts the `@` namespace - you use regular keyexprs, and Zenoh handles the namespace mapping internally. No special prefixes needed in application code.
 
 ## Usage Example (Conceptual)
-```
 
 ```rust
-use zenoh_arena::{Arena, ArenaConfig, GameEngine, NodeId};
+use zenoh_arena::{Node, NodeConfig, GameEngine, NodeId};
 
 // Define your game engine
 struct MyGameEngine {
@@ -672,32 +701,32 @@ impl GameEngine for MyGameEngine {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Configure arena
-    let config = ArenaConfig::default();
+    // Configure node
+    let config = NodeConfig::default();
     
-    // Create engine
-    let engine = MyGameEngine::new();
+    // Create engine (None if this node should only be client)
+    let engine = Some(MyGameEngine::new());
     
-    // Create arena
-    let mut arena = Arena::new(config, engine).await?;
+    // Create node
+    let mut node = Node::new(config, engine).await?;
     
     // Subscribe to state updates
-    let mut state_rx = arena.subscribe_state();
-    let mut arena_state_rx = arena.subscribe_arena_state();
+    let mut state_rx = node.subscribe_state();
+    let mut node_state_rx = node.subscribe_node_state();
     
-    // Start arena (automatic host discovery/role negotiation)
-    arena.start().await?;
+    // Start node (automatic host discovery/role negotiation)
+    node.start().await?;
     
     // Main loop
     loop {
         tokio::select! {
-            Some(state) = state_rx.recv() => {
+            Ok(state_update) = state_rx.recv_async() => {
                 // Handle game state update
-                println!("New state: {:?}", state);
+                println!("New state from {}: {:?}", state_update.source, state_update.state);
             }
-            Some(arena_state) = arena_state_rx.recv() => {
-                // Handle arena state change
-                println!("Arena state: {:?}", arena_state);
+            Ok(node_state) = node_state_rx.recv_async() => {
+                // Handle node state change
+                println!("Node state: {:?}", node_state);
             }
             // Handle user input, send actions, etc.
         }
@@ -747,14 +776,27 @@ tracing = "0.1"
 
 ## Open Questions & Future Enhancements
 
-1. **Multi-host support**: Should clients be able to query multiple hosts and choose?
-2. **Host migration**: Should state transfer to a new host when old host disconnects?
-3. **Spectator mode**: Should there be a read-only observer role?
-4. **Matchmaking**: Should there be a matchmaking service for pairing clients?
-5. **Security**: Authentication and encryption considerations
-6. **Metrics**: Built-in latency/performance monitoring
+1. **Multi-host support**: Should clients be able to query multiple hosts and choose based on criteria (latency, player count)?
+2. **Host migration**: Should a client automatically become host and transfer state when the current host disconnects?
+3. **Spectator mode**: Should there be a read-only observer role that doesn't participate in the game?
+4. **Matchmaking**: Should there be optional matchmaking to help clients find suitable hosts?
+5. **Security**: Authentication and encryption considerations for private games
+6. **Metrics**: Built-in latency/performance monitoring for debugging
 7. **Backpressure**: How to handle slow clients or network congestion
-8. **Partial state updates**: Delta encoding for large states
+8. **Partial state updates**: Delta encoding for large states to reduce bandwidth
+
+## Architecture Summary
+
+**Key Differences from Traditional Client-Server:**
+
+- **No Central Arena**: Each `Node` is autonomous and manages its own view of the network
+- **P2P Discovery**: Hosts advertise themselves via Zenoh queryables, clients discover via queries
+- **Role Flexibility**: Any node can be a host or client, roles can change dynamically
+- **Local State Management**: Each node maintains its local view of connected nodes
+- **Engine on Host**: Game logic runs only on the host node, clients are thin
+- **Pub/Sub Data Flow**: Efficient multicast state distribution, wildcard action collection
+
+This design embraces Zenoh's P2P nature - there's no centralized "arena server". Each node is a peer that can discover others, negotiate roles, and participate in game sessions.
 
 ## Testing Strategy
 
@@ -837,13 +879,15 @@ impl zenoh_ext::Deserialize for BonjourAction {
 ```
 
 **Terminal UI**:
-- Display current arena state (Searching/Client/Host)
+
+- Display current node state (Searching/Client/Host)
 - Display connected clients (if host)
 - Press any key to send `Bonjour` action
 - Display received `Bonsoir` state
 - Press 'q' to quit
 
 **Verification Goals**:
+
 - Host discovery works correctly
 - Client-host connection established
 - Actions sent from client reach host engine
