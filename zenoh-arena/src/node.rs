@@ -1,51 +1,180 @@
 /// Node management module
-use std::time::Instant;
+use std::sync::Arc;
 
-use crate::types::{NodeId, NodeInfo, NodeRole};
+use crate::config::NodeConfig;
+use crate::error::{ArenaError, Result};
+use crate::types::{NodeId, NodeState};
 
-/// Node manager for tracking node identity and state
-#[derive(Debug)]
-pub struct Node {
-    info: NodeInfo,
+/// Main Node interface - manages host/client behavior and game sessions
+///
+/// A Node is autonomous and manages its own role, connections, and game state.
+/// There is no central "Arena" - each node has its local view of the network.
+pub struct Node<E: GameEngine, F: Fn() -> E> {
+    /// Node identifier
+    id: NodeId,
+    
+    /// Node configuration
+    #[allow(dead_code)]
+    config: NodeConfig,
+    
+    /// Current node state
+    state: NodeState<E>,
+    
+    /// Zenoh session (wrapped for shared access)
+    session: Arc<zenoh::Session>,
+    
+    /// Engine factory - called when transitioning to host mode
+    get_engine: F,
 }
 
-impl Node {
-    /// Create a new node with the given ID and role
-    pub fn new(id: NodeId, role: NodeRole) -> Self {
-        Self {
-            info: NodeInfo {
-                id,
-                role,
-                connected_since: Instant::now(),
-            },
-        }
+impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
+    /// Create a new Node instance
+    ///
+    /// `get_engine` is a factory function that creates an engine when needed
+    pub async fn new(config: NodeConfig, get_engine: F) -> Result<Self> {
+        // Create or validate node ID
+        let id = match &config.node_name {
+            Some(name) => NodeId::from_name(name.clone())?,
+            None => NodeId::generate(),
+        };
+        
+        // Initialize Zenoh session with provided configuration
+        let session = zenoh::open(config.zenoh_config.clone())
+            .await
+            .map_err(ArenaError::Zenoh)?;
+        
+        tracing::info!("Node '{}' initialized with Zenoh session", id);
+        
+        Ok(Self {
+            id,
+            config,
+            state: NodeState::SearchingHost,
+            session: Arc::new(session),
+            get_engine,
+        })
     }
-
-    /// Get the node's ID
+    
+    /// Get node ID
     pub fn id(&self) -> &NodeId {
-        &self.info.id
+        &self.id
     }
+    
+    /// Get reference to Zenoh session
+    pub fn session(&self) -> &Arc<zenoh::Session> {
+        &self.session
+    }
+    
+    /// Run the node state machine
+    ///
+    /// This is the main event loop that manages state transitions between
+    /// SearchingHost -> Client or Host modes
+    pub async fn run(&mut self) -> Result<()> {
+        // State machine implementation will be expanded in future phases
+        match &mut self.state {
+            NodeState::SearchingHost => {
+                tracing::info!("Node '{}' searching for hosts...", self.id);
+                // TODO: Implement host discovery logic
+                // For now, just transition to Host mode if auto_host is enabled
+                if self.config.auto_host {
+                    tracing::info!("Node '{}' becoming host (no hosts found)", self.id);
+                    let engine = (self.get_engine)();
+                    self.state = NodeState::Host {
+                        is_accepting: true,
+                        connected_clients: Vec::new(),
+                        engine,
+                    };
+                }
+            }
+            NodeState::Client { host_id } => {
+                tracing::info!("Node '{}' running as client connected to '{}'", self.id, host_id);
+                // TODO: Implement client behavior
+            }
+            NodeState::Host { is_accepting, connected_clients, engine: _ } => {
+                tracing::info!(
+                    "Node '{}' running as host (accepting: {}, clients: {})",
+                    self.id,
+                    is_accepting,
+                    connected_clients.len()
+                );
+                // TODO: Implement host behavior
+            }
+        }
+        
+        Ok(())
+    }
+}
 
-    /// Get the node's role
-    pub fn role(&self) -> NodeRole {
-        self.info.role
-    }
-
-    /// Get the node's full information
-    pub fn info(&self) -> &NodeInfo {
-        &self.info
-    }
-
-    /// Update the node's role
-    pub fn set_role(&mut self, role: NodeRole) {
-        self.info.role = role;
-        self.info.connected_since = Instant::now();
-    }
+/// Trait for game engine integration
+///
+/// The engine runs only on the host node and processes actions from clients
+pub trait GameEngine: Send + Sync {
+    /// Action type from user/client
+    type Action: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send;
+    
+    /// State type sent to clients
+    type State: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone;
+    
+    /// Initialize the game engine
+    fn initialize(&mut self) -> Result<Self::State>;
+    
+    /// Process an action and return new state
+    fn process_action(
+        &mut self,
+        action: Self::Action,
+        client_id: &NodeId,
+    ) -> Result<Self::State>;
+    
+    /// Get current state
+    fn current_state(&self) -> Self::State;
+    
+    /// Tick/update game state (for time-based games)
+    fn tick(&mut self, delta_ms: u64) -> Option<Self::State>;
+    
+    /// Client connected notification
+    fn client_connected(&mut self, client_id: &NodeId);
+    
+    /// Client disconnected notification
+    fn client_disconnected(&mut self, client_id: &NodeId);
+    
+    /// Check if game session has ended
+    fn is_session_ended(&self) -> bool;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Simple test engine for testing purposes
+    #[derive(Debug)]
+    struct TestEngine;
+    
+    impl GameEngine for TestEngine {
+        type Action = u32;
+        type State = String;
+        
+        fn initialize(&mut self) -> Result<Self::State> {
+            Ok("initialized".to_string())
+        }
+        
+        fn process_action(&mut self, _action: Self::Action, _client_id: &NodeId) -> Result<Self::State> {
+            Ok("processed".to_string())
+        }
+        
+        fn current_state(&self) -> Self::State {
+            "current".to_string()
+        }
+        
+        fn tick(&mut self, _delta_ms: u64) -> Option<Self::State> {
+            None
+        }
+        
+        fn client_connected(&mut self, _client_id: &NodeId) {}
+        fn client_disconnected(&mut self, _client_id: &NodeId) {}
+        
+        fn is_session_ended(&self) -> bool {
+            false
+        }
+    }
 
     #[test]
     fn test_node_id_generation() {
@@ -83,23 +212,55 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_node_creation() {
-        let id = NodeId::generate();
-        let node = Node::new(id.clone(), NodeRole::Client);
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_node_creation_with_auto_generated_id() {
+        let config = NodeConfig::default();
+        let get_engine = || TestEngine;
         
-        assert_eq!(node.id(), &id);
-        assert_eq!(node.role(), NodeRole::Client);
+        let node = Node::new(config, get_engine).await;
+        assert!(node.is_ok());
+        
+        let node = node.unwrap();
+        assert!(!node.id().as_str().is_empty());
     }
 
-    #[test]
-    fn test_node_role_update() {
-        let id = NodeId::generate();
-        let mut node = Node::new(id, NodeRole::Client);
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_node_creation_with_custom_name() {
+        let config = NodeConfig::default()
+            .with_node_name("my_custom_node".to_string());
+        let get_engine = || TestEngine;
         
-        assert_eq!(node.role(), NodeRole::Client);
+        let node = Node::new(config, get_engine).await;
+        assert!(node.is_ok());
         
-        node.set_role(NodeRole::Host);
-        assert_eq!(node.role(), NodeRole::Host);
+        let node = node.unwrap();
+        assert_eq!(node.id().as_str(), "my_custom_node");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_node_creation_with_invalid_name() {
+        let config = NodeConfig::default()
+            .with_node_name("invalid/name".to_string());
+        let get_engine = || TestEngine;
+        
+        let result = Node::new(config, get_engine).await;
+        assert!(result.is_err());
+        if let Err(e) = result {
+            match e {
+                ArenaError::InvalidNodeName(_) => {} // Expected
+                other => panic!("Expected InvalidNodeName error, got {:?}", other),
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_node_run_becomes_host() {
+        let config = NodeConfig::default()
+            .with_auto_host(true);
+        let get_engine = || TestEngine;
+        
+        let mut node = Node::new(config, get_engine).await.unwrap();
+        let result = node.run().await;
+        assert!(result.is_ok());
     }
 }

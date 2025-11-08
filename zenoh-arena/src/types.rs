@@ -83,16 +83,14 @@ pub struct NodeInfo {
     pub connected_since: Instant,
 }
 
-/// Current state of a Node
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NodeState {
-    /// Initializing
-    Initializing,
-
+/// Current state of a Node (internal)
+#[derive(Debug)]
+pub(crate) enum NodeState<E> {
     /// Searching for available hosts
     SearchingHost,
 
     /// Connected as client to a host
+    #[allow(dead_code)]
     Client {
         /// ID of the host we're connected to
         host_id: NodeId,
@@ -104,27 +102,27 @@ pub enum NodeState {
         is_accepting: bool,
         /// List of connected client IDs
         connected_clients: Vec<NodeId>,
+        /// Game engine (only present in Host mode)
+        #[allow(dead_code)]
+        engine: E,
     },
-
-    /// Transitioning between states
-    Transitioning,
-
-    /// Stopped/Closed
-    Stopped,
 }
 
-impl NodeState {
+impl<E> NodeState<E> {
     /// Check if currently in host mode
+    #[allow(dead_code)]
     pub fn is_host(&self) -> bool {
         matches!(self, NodeState::Host { .. })
     }
 
     /// Check if currently in client mode
+    #[allow(dead_code)]
     pub fn is_client(&self) -> bool {
         matches!(self, NodeState::Client { .. })
     }
 
     /// Check if host mode and accepting clients
+    #[allow(dead_code)]
     pub fn is_accepting_clients(&self) -> bool {
         matches!(
             self,
@@ -136,6 +134,7 @@ impl NodeState {
     }
 
     /// Get number of connected clients (None if not host)
+    #[allow(dead_code)]
     pub fn client_count(&self) -> Option<usize> {
         match self {
             NodeState::Host { connected_clients, .. } => Some(connected_clients.len()),
