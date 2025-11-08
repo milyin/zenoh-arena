@@ -2,6 +2,8 @@
 
 A peer-to-peer network framework for simple game applications built on the [Zenoh](https://docs.rs/zenoh/latest/zenoh/) network library.
 
+**Current Status**: Early development - Phase 1 complete (core infrastructure and local node management). Network layer implementation in progress.
+
 ## Overview
 
 `zenoh-arena` provides a Node-centric architecture where each application instance manages its own role (host or client), handles discovery, connection management, and state synchronization for distributed game sessions. There is no central coordinator—each node is autonomous and manages its local view of the network.
@@ -107,7 +109,7 @@ When a client detects that its host has disconnected (via liveliness monitoring)
 4. Becomes **Host** if no other hosts are found
 5. Otherwise, connects to an available host and becomes **Client**
 
-**Note**: Failover is not applicable when `force_host` is enabled, as the node is always a host.
+**Note**: Failover behavior will be implemented in Phase 5. Currently, only local node state management is implemented. Network layer features are planned for future phases.
 
 ## API Layers
 
@@ -116,36 +118,77 @@ The framework provides three distinct API surfaces:
 ### 1. User Interface ↔ Framework
 
 - User interface is agnostic to current node mode (host or client)
-- Framework accepts data of type `ACTION`
-- Framework emits data of type `STATE`
+- Framework accepts commands via `NodeCommand::GameAction(ACTION)`
+- Framework returns node status via `NodeStatus<STATE>` from `step()` method
 - Types must support [Zenoh serialization](https://docs.rs/zenoh-ext/latest/zenoh_ext/)
-- Data is either delivered to remote host or processed locally
+- Data is either delivered to remote host or processed locally (depending on implementation phase)
 
 ### 2. Framework ↔ Game Engine
 
-- When in host mode, framework instantiates game engine
-- Forwards `ACTION`s from clients to engine
-- Receives `STATE` updates from engine
-- Distributes states to connected clients
+- When in host mode, framework manages game engine instance
+- Forwards `ACTION`s to engine via `process_action()` method
+- Receives `STATE` updates from engine as return value
+- Engine only runs on host nodes
 
-### 3. Framework ↔ Framework (Internal)
+### 3. Framework ↔ Framework (Internal - Planned)
 
 - Node-to-node communication using Zenoh network API
 - Discovery, connection handshake, and data exchange
 - Liveliness monitoring
+- **Status**: Planned for Phase 2-4 implementation
 
-## Example: z_tetris Application
+## API Usage
 
-The `z_tetris` application demonstrates `zenoh-arena` usage with a multiplayer Tetris game.
+### Creating a Node
 
-### Features
+Nodes are created using the builder pattern via the `SessionExt` trait:
+
+1. Create a Zenoh session
+2. Call `declare_arena_node()` on the session with an engine factory function
+3. Configure the node using builder methods:
+   - `name()` - Set custom node name (optional, auto-generated if not specified)
+   - `force_host()` - Force the node to always be a host
+   - `step_timeout_ms()` - Set timeout for step() method
+4. Await the builder to create the node
+
+### Sending Commands
+
+Commands are sent to the node via a command sender channel:
+
+- `NodeCommand::GameAction(action)` - Send an action to be processed
+- `NodeCommand::Stop` - Stop the node's event loop
+
+### Processing Node Events
+
+The `step()` method processes pending commands and returns:
+- `Some(NodeStatus)` - Contains current node state and optional game state
+- `None` - Node has stopped (Stop command received or channel closed)
+
+Call `step()` in a loop to drive the node's event processing.
+
+## Example Applications
+
+### z_bonjour - Minimal Example
+
+A minimal example demonstrating the core API:
+
+- Simple counter engine that increments on each action
+- Terminal interface to send actions
+- Demonstrates node lifecycle and state management
+- Located in `z_bonjour/` directory
+
+### z_tetris - Full Game Example (Planned)
+
+The `z_tetris` application will demonstrate full multiplayer functionality with a competitive Tetris game.
+
+#### Features
 
 - Uses [gametetris-rs](https://github.com/milyin/gametetris-rs) library as game engine
 - Single terminal application
 - Automatic host discovery and connection
 - One-on-one competitive gameplay
 
-### Behavior
+#### Planned Behavior
 
 **Startup:**
 
@@ -169,3 +212,5 @@ The `z_tetris` application demonstrates `zenoh-arena` usage with a multiplayer T
 
 - Losing host closes itself
 - Winning client searches for new opponent
+
+**Note**: z_tetris implementation is planned for Phase 4+ (after network layer completion).
