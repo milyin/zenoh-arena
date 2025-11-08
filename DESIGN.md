@@ -38,52 +38,80 @@ This ensures complete isolation between application data and liveliness tracking
 
 ## Core Concepts
 
-### Node Roles
+### Node States
 
-Each `Node` operates in one of two modes:
+Each `Node` operates in one of three states:
 
-- **Client Mode**: Node searches for available hosts, connects to one, sends actions, receives game state
-- **Host Mode**: Node runs the game engine, accepts client connections, processes actions, broadcasts state
+- **SearchingHost**: Node is looking for available hosts to connect to
+- **Client**: Node is connected to a host, sending actions and receiving game state
+- **Host**: Node runs the game engine, accepts client connections, processes actions, broadcasts state
+
+**Important**: NodeState is an internal implementation detail and not exposed in the public API.
 
 ### Node Behavior
 
+**As SearchingHost:**
+
+- Queries the network for available hosts via Zenoh query
+- Evaluates available hosts based on acceptance status and capacity
+- Waits for responses with configurable timeout and randomized jitter
+- Transitions to Client state when a host accepts connection
+- Transitions to Host state when no hosts found (depending on configuration)
+- Note: This state is skipped entirely if `force_host` is enabled
+
 **As Client:**
-- Discovers available hosts via Zenoh query
-- Chooses and connects to a host
-- Publishes actions to host
+
+- Maintains connection to a specific host
+- Publishes actions to host via dedicated keyexpr
 - Subscribes to state updates from host
-- Monitors host liveliness
-- Reconnects or becomes host if current host disconnects
+- Monitors host liveliness via liveliness tokens
+- Transitions to SearchingHost if host disconnects or connection is lost
+- Note: This state cannot be entered if `force_host` is enabled
 
 **As Host:**
-- Declares queryable for discovery
-- Accepts/rejects client join requests
+
+- Runs the game engine instance
+- Declares queryable for discovery (when accepting clients)
+- Accepts/rejects client join requests based on capacity
 - Subscribes to actions from all clients (wildcard pattern)
 - Processes actions through game engine
 - Publishes state updates to all clients
 - Manages client lifecycle (connections/disconnections)
 - Declares liveliness token
+- Can be Open (accepting clients) or Closed (not accepting)
+- Can be Empty (no clients) or have connected clients
+- Normally transitions to SearchingHost when session ends or by user request
+- If `force_host` is enabled, remains in Host state permanently
 
-**Role Transitions:**
-```
-Node Start (no preference)
+**State Transitions:**
+
+```text
+Normal Mode (force_host = false):
+
+Node Start
     |
     v
-Search for Hosts
+SearchingHost
     |
-    ├─> Host Found ──> Become Client ──> (Monitor host liveness)
-    |                                              |
-    |                                              v
-    |                                    (Host disconnects)
-    |                                              |
-    └─> No Hosts Found ─────────────────┴────> Become Host
-                                                    |
-                                                    v
-                                        (Session ends or manual stop)
-                                                    |
-                                                    v
-                                              Back to Search
+    ├─> Host Found ──> Client ──> (Monitor host liveness)
+    |                      |
+    |                      v
+    |            (Host disconnects)
+    |                      |
+    └─> No Hosts ─────────┴────> Host
+                                   |
+                                   v
+                         (Session ends/user stop)
+                                   |
+                                   v
+                            SearchingHost
+
+
+Force Host Mode (force_host = true):
+
+Node Start ──> Host (permanent, no transitions)
 ```
+
 
 ## Architecture
 
@@ -140,8 +168,8 @@ pub struct NodeConfig {
     /// Maximum number of clients per host (None = unlimited)
     pub max_clients: Option<usize>,
     
-    /// Whether to automatically become host if no hosts found
-    pub auto_host: bool,
+    /// Whether to force host mode (blocks Searching and Client states)
+    pub force_host: bool,
     
     /// Key expression prefix for arena communication
     pub keyexpr_prefix: String,
@@ -155,7 +183,7 @@ impl Default for NodeConfig {
             discovery_timeout_ms: 5000,
             discovery_jitter: 0.3,
             max_clients: Some(4),
-            auto_host: true,
+            force_host: false,
             keyexpr_prefix: "zenoh/arena".to_string(),
         }
     }
@@ -205,15 +233,12 @@ pub enum NodeRole {
 }
 ```
 
-### Node State
+### Node State (Internal)
 
 ```rust
-/// Current state of a Node
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NodeState {
-    /// Initializing
-    Initializing,
-    
+/// Current state of a Node (internal implementation detail)
+#[derive(Debug)]
+pub(crate) enum NodeState<E> {
     /// Searching for available hosts
     SearchingHost,
     
@@ -226,22 +251,19 @@ pub enum NodeState {
     Host {
         is_accepting: bool,
         connected_clients: Vec<NodeId>,
+        engine: E,  // Game engine stored in Host state
     },
-    
-    /// Transitioning between states
-    Transitioning,
-    
-    /// Stopped/Closed
-    Stopped,
 }
 
-impl NodeState {
+impl<E> NodeState<E> {
     pub fn is_host(&self) -> bool;
     pub fn is_client(&self) -> bool;
     pub fn is_accepting_clients(&self) -> bool;
-    pub fn client_count(&self) -> usize;
+    pub fn client_count(&self) -> Option<usize>;
 }
 ```
+
+**Note**: NodeState is not exposed in the public API. It's an internal implementation detail of the Node.
 
 ### Game Engine Integration
 
@@ -290,62 +312,66 @@ pub trait GameEngine: Send + Sync {
 /// 
 /// A Node is autonomous and manages its own role, connections, and game state.
 /// There is no central "Arena" - each node has its local view of the network.
-pub struct Node<E: GameEngine> {
+pub struct Node<E: GameEngine, F: Fn() -> E> {
     id: NodeId,
     config: NodeConfig,
-    state: Arc<RwLock<NodeState>>,
+    state: NodeState<E>,  // Internal state, not exposed in public API
     session: Arc<zenoh::Session>,
-    engine: Option<E>,
-    
-    // Internal network management
-    // (queryable, subscribers, publishers, liveliness tokens, etc.)
+    get_engine: F,  // Engine factory - called when transitioning to host mode
 }
 
-impl<E: GameEngine> Node<E> {
+impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Create a new Node instance
     /// 
-    /// `engine` is optional - only needed if node can become a host
-    pub async fn new(config: NodeConfig, engine: Option<E>) -> Result<Self, ArenaError>;
+    /// `get_engine` is a factory function that creates an engine when needed.
+    /// If force_host is enabled, the engine is created immediately and node starts in Host state.
+    /// Otherwise, node starts in SearchingHost state.
+    pub async fn new(config: NodeConfig, get_engine: F) -> Result<Self, ArenaError>;
     
-    /// Start the node (begins host discovery or becomes host immediately)
-    pub async fn start(&mut self) -> Result<(), ArenaError>;
-    
-    /// Stop the node
-    pub async fn stop(&mut self) -> Result<(), ArenaError>;
-    
-    /// Get current node state
-    pub fn state(&self) -> NodeState;
+    /// Run the node state machine
+    /// 
+    /// This is the main event loop that manages state transitions.
+    /// Returns error if force_host is enabled but node is not in Host state.
+    pub async fn run(&mut self) -> Result<(), ArenaError>;
     
     /// Get node ID
     pub fn id(&self) -> &NodeId;
     
-    /// Send an action (as client or local processing as host)
-    pub async fn send_action(&self, action: E::Action) -> Result<(), ArenaError>;
+    /// Get reference to Zenoh session
+    pub fn session(&self) -> &Arc<zenoh::Session>;
     
-    /// Subscribe to game state updates
-    pub fn subscribe_state(&self) -> StateReceiver<E::State>;
-    
-    /// Subscribe to node state changes
-    pub fn subscribe_node_state(&self) -> NodeStateReceiver;
-    
-    /// Force role to host (if not already)
-    pub async fn become_host(&mut self) -> Result<(), ArenaError>;
-    
-    /// Disconnect from current host (if client)
-    pub async fn disconnect(&mut self) -> Result<(), ArenaError>;
-    
-    /// Set whether host is accepting new clients (if host)
-    pub async fn set_accepting_clients(&mut self, accepting: bool) -> Result<(), ArenaError>;
-    
-    /// Kick a client (if host)
-    pub async fn kick_client(&mut self, client_id: &NodeId) -> Result<(), ArenaError>;
+    // Future API methods (to be implemented in later phases):
+    // - send_action()
+    // - subscribe_state()
+    // - become_host()
+    // - disconnect()
+    // - set_accepting_clients()
+    // - kick_client()
 }
+```
 
+**Key API Design Changes from Original Design:**
+
+1. **Engine Factory Pattern**: Instead of `Option<E>`, uses `F: Fn() -> E` closure
+   - Allows creating new engine instances on demand
+   - Supports both reusing existing engines and creating new ones
+   
+2. **State is Internal**: NodeState is not exposed in public API
+   - Users interact through `run()` method and future action/state subscription APIs
+   
+3. **Simplified Startup**: Just `new()` and `run()`
+   - No separate `start()` / `stop()` methods in Phase 1
+   - Node begins in appropriate state based on `force_host` configuration
+   
+4. **Force Host Mode**: Blocks non-host states at configuration time
+   - More predictable than runtime `auto_host` decision
+   - Enforced by `run()` method returning error if state is invalid
+
+### State Update API (Future Phases)
+
+```rust
 /// Receiver for game state updates (using flume, same as zenoh)
 pub type StateReceiver<T> = flume::Receiver<StateUpdate<T>>;
-
-/// Receiver for node state changes (using flume, same as zenoh)
-pub type NodeStateReceiver = flume::Receiver<NodeState>;
 
 #[derive(Debug, Clone)]
 pub struct StateUpdate<T> {
