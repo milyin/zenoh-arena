@@ -149,8 +149,10 @@ impl<S: std::fmt::Display> std::fmt::Display for NodeStatus<S> {
 
 /// Current state of a Node (internal)
 #[derive(Debug)]
+#[derive(Default)]
 pub(crate) enum NodeStateInternal<E> {
     /// Searching for available hosts
+    #[default]
     SearchingHost,
 
     /// Connected as client to a host
@@ -209,6 +211,73 @@ impl<E> NodeStateInternal<E> {
             } => Some(connected_clients.len()),
             _ => None,
         }
+    }
+
+    /// Transition to SearchingHost state from any state
+    ///
+    /// Drops the current state (including engine and liveliness token if in Host mode)
+    #[allow(dead_code)]
+    pub fn searching(self) -> Self {
+        NodeStateInternal::SearchingHost
+    }
+
+    /// Transition from SearchingHost to Host state
+    ///
+    /// Creates liveliness token and calls update_host to set is_accepting
+    pub async fn host(
+        self,
+        engine: E,
+        session: &zenoh::Session,
+        prefix: &zenoh::key_expr::KeyExpr<'_>,
+        node_id: &NodeId,
+    ) -> Result<Self>
+    where
+        E: crate::node::GameEngine,
+    {
+        // Create liveliness token
+        let token = NodeLivelinessToken::declare(session, prefix, node_id.clone()).await?;
+
+        let mut new_state = NodeStateInternal::Host {
+            is_accepting: false, // Will be updated by update_host
+            connected_clients: Vec::new(),
+            engine,
+            liveliness_token: Some(token),
+        };
+
+        // Update is_accepting based on max_clients
+        new_state.update_host();
+
+        Ok(new_state)
+    }
+
+    /// Update Host state by checking if we should accept clients
+    ///
+    /// Sets is_accepting to true if current client count is less than max_clients
+    pub fn update_host(&mut self)
+    where
+        E: crate::node::GameEngine,
+    {
+        if let NodeStateInternal::Host {
+            is_accepting,
+            connected_clients,
+            engine,
+            ..
+        } = self
+        {
+            let max = engine.max_clients();
+            let current = connected_clients.len();
+
+            *is_accepting = match max {
+                None => true, // Unlimited clients
+                Some(max_count) => current < max_count,
+            };
+        }
+    }
+
+    /// Transition from SearchingHost to Client state
+    #[allow(dead_code)]
+    pub fn client(self, host_id: NodeId) -> Self {
+        NodeStateInternal::Client { host_id }
     }
 }
 

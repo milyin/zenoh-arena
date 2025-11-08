@@ -66,21 +66,12 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             tracing::info!("Node '{}' forced to host mode", id);
             let engine = get_engine();
             
-            // Create liveliness token
-            let token = crate::network::NodeLivelinessToken::declare(
-                &session,
-                &config.keyexpr_prefix,
-                id.clone()
-            ).await?;
-            
-            NodeStateInternal::Host {
-                is_accepting: true,
-                connected_clients: Vec::new(),
-                engine,
-                liveliness_token: Some(token),
-            }
+            // Use the transition function to create host state
+            NodeStateInternal::default()
+                .host(engine, &session, &config.keyexpr_prefix, &id)
+                .await?
         } else {
-            NodeStateInternal::SearchingHost
+            NodeStateInternal::default()
         };
 
         let node = Self {
@@ -206,6 +197,11 @@ pub trait GameEngine: Send + Sync {
 
     /// Process an action and return new state
     fn process_action(&mut self, action: Self::Action, client_id: &NodeId) -> Result<Self::State>;
+
+    /// Maximum number of clients allowed (None = unlimited)
+    fn max_clients(&self) -> Option<usize> {
+        Some(4) // Default to 4 clients
+    }
 }
 
 #[cfg(test)]
