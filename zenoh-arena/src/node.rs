@@ -375,4 +375,34 @@ mod tests {
         assert!(status2.game_state.is_some());
         assert_eq!(status2.game_state.unwrap(), "processed");
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_session_ext_declare_arena_node() {
+        use crate::session_ext::SessionExt;
+
+        // Create a zenoh session
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+
+        // Use the extension trait to declare a node
+        let (node, sender) = session
+            .declare_arena_node(|| TestEngine)
+            .force_host(true)
+            .name("test_node".to_string())
+            .step_timeout_ms(50)
+            .await
+            .unwrap();
+
+        // Verify the node was created correctly
+        assert_eq!(node.id().as_str(), "test_node");
+
+        // Send an action and verify it works
+        sender
+            .send_async(NodeCommand::GameAction(42))
+            .await
+            .unwrap();
+
+        // Drop the node and sender
+        drop(sender);
+        drop(node);
+    }
 }
