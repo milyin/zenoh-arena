@@ -25,6 +25,17 @@ The library uses Zenoh's native serialization format (`zenoh-ext`) rather than s
 - Ensures interoperability between Zenoh-based applications
 - See [Zenoh Serialization Format](https://github.com/eclipse-zenoh/roadmap/blob/main/rfcs/ALL/Serialization.md)
 
+### Liveliness Namespace Separation
+
+Zenoh's liveliness tokens are stored in a **hermetic `@` namespace**, completely separate from regular pub/sub data:
+- Liveliness tokens cannot interfere with or match regular keyexprs
+- The `@` namespace is used by Zenoh for control/admin data
+- The liveliness API abstracts this - you use normal keyexprs, Zenoh handles the mapping
+- Example: `session.liveliness().declare_token("my/app/node1")` is internally mapped to `@<internal>/my/app/node1`
+- No special prefixes or namespace handling needed in application code
+
+This ensures complete isolation between application data and liveliness tracking.
+
 ## Core Concepts
 
 ### Application Roles
@@ -401,7 +412,10 @@ struct KeyExpressions {
     /// Client-specific: <prefix>/host/<host_id>/client/<client_id>
     client: String,
     
-    /// Liveliness: <prefix>/liveliness/<node_id>
+    /// Liveliness token keyexpr: <prefix>/node/<node_id>
+    /// Note: Liveliness tokens are stored in Zenoh's hermetic @ namespace
+    /// automatically by the liveliness API, separate from regular pub/sub data.
+    /// We use a regular keyexpr which Zenoh internally maps to @<keyexpr>
     liveliness: String,
 }
 
@@ -552,11 +566,18 @@ pub type Result<T> = std::result::Result<T, ArenaError>;
 - Two-phase commit: request -> accept -> confirm
 
 ### 7. Liveliness
-- Each node declares liveliness token
-- Clients monitor host liveliness
+
+- Each node declares a liveliness token using `session.liveliness().declare_token(keyexpr)`
+- Liveliness tokens are automatically stored in Zenoh's hermetic `@` namespace
+- This namespace is separate from regular pub/sub data - prevents interference
+- Clients monitor host liveliness using `session.liveliness().declare_subscriber(keyexpr)`
+- Clients subscribe to liveliness changes to detect host disconnection
 - Automatic reconnection on host failure
 
+**Important**: The liveliness API abstracts the `@` namespace - you use regular keyexprs, and Zenoh handles the namespace mapping internally. No special prefixes needed in application code.
+
 ## Usage Example (Conceptual)
+```
 
 ```rust
 use zenoh_arena::{Arena, ArenaConfig, GameEngine, NodeId};
