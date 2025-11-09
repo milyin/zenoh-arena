@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
+use crate::network::node_queryable::NodeRequest;
 use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
 
 /// Commands that can be sent to the node
@@ -59,13 +60,15 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 
         // Initial state depends on force_host configuration
         let mut state = NodeStateInternal::default();
-        
+
         if config.force_host {
             tracing::info!("Node '{}' forced to host mode", id);
             let engine = get_engine();
-            
+
             // Use the transition function to create host state
-            state.host(engine, &session, &config.keyexpr_prefix, &id).await?;
+            state
+                .host(engine, &session, &config.keyexpr_prefix, &id)
+                .await?;
         }
 
         let node = Self {
@@ -183,7 +186,10 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         // Process commands until timeout or new state
         loop {
             // Get a fresh reference to queryable for this iteration
-            let queryable = if let NodeStateInternal::Host { queryable: Some(q), .. } = &self.state {
+            let queryable = if let NodeStateInternal::Host {
+                queryable: Some(q), ..
+            } = &self.state
+            {
                 q
             } else {
                 return Ok(Some(NodeStatus {
@@ -202,9 +208,8 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 }
                 // Query received from a client (connection request)
                 request_result = queryable.expect_connection() => {
-                    if let Ok(_request) = request_result {
-                        tracing::debug!("Node '{}' received connection request from client", self.id);
-                        // TODO: Process request and send response with host info
+                    if let Ok(request) = request_result {
+                        self.handle_connection_request(request).await?;
                     }
                 }
                 // Command received
@@ -310,12 +315,14 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 game_state: None,
             }))
         } else {
-            self.state.host(
-                (self.get_engine)(),
-                &self.session,
-                &self.config.keyexpr_prefix,
-                &self.id
-            ).await?;
+            self.state
+                .host(
+                    (self.get_engine)(),
+                    &self.session,
+                    &self.config.keyexpr_prefix,
+                    &self.id,
+                )
+                .await?;
             Ok(Some(NodeStatus {
                 state: NodeState::from(&self.state),
                 game_state: None,
@@ -323,6 +330,61 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         }
     }
 
+    /// Handle a connection request from a client
+    ///
+    /// Checks if the node is in host mode and if the current client count is below the maximum.
+    /// Accepts the connection if capacity is available, otherwise rejects it.
+    async fn handle_connection_request(&mut self, request: NodeRequest) -> Result<()> {
+        let NodeStateInternal::Host {
+            engine,
+            connected_clients,
+            ..
+        } = &mut self.state
+        else {
+            tracing::warn!(
+                "Node '{}' received connection request but not in host mode",
+                self.id
+            );
+            return Ok(());
+        };
+
+        let current_count = connected_clients.len();
+        let max_allowed = engine.max_clients();
+
+        let should_accept = max_allowed.map(|max| current_count < max).unwrap_or(true); // Accept if no limit
+
+        if should_accept {
+            match request.accept().await {
+                Ok(client_id) => {
+                    tracing::info!(
+                        "Node '{}' accepted connection from client '{}' ({}/{})",
+                        self.id,
+                        client_id,
+                        connected_clients.len() + 1,
+                        max_allowed
+                            .map(|m| m.to_string())
+                            .unwrap_or_else(|| "unlimited".to_string())
+                    );
+                    connected_clients.push(client_id);
+                }
+                Err(e) => {
+                    tracing::warn!("Node '{}' failed to accept connection: {:?}", self.id, e);
+                }
+            }
+        } else {
+            tracing::info!(
+                "Node '{}' rejected connection from client '{}' (limit reached: {}/{})",
+                self.id,
+                request.client_id().as_str(),
+                current_count,
+                max_allowed.unwrap_or(0)
+            );
+            if let Err(e) = request.reject("Maximum number of clients reached").await {
+                tracing::warn!("Node '{}' failed to reject connection: {:?}", self.id, e);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Trait for game engine integration
@@ -406,7 +468,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
         use crate::session_ext::SessionExt;
-        
+
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -420,7 +482,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_custom_name() {
         use crate::session_ext::SessionExt;
-        
+
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -438,14 +500,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_invalid_name() {
         use crate::session_ext::SessionExt;
-        
+
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
         let builder_result = session
             .declare_arena_node(get_engine)
             .name("invalid/name".to_string());
-        
+
         assert!(builder_result.is_err());
         if let Err(e) = builder_result {
             match e {
@@ -458,7 +520,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_step_with_force_host() {
         use crate::session_ext::SessionExt;
-        
+
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -496,7 +558,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_force_host_starts_in_host_state() {
         use crate::session_ext::SessionExt;
-        
+
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -512,14 +574,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
         use crate::session_ext::SessionExt;
-        
+
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
-        let node = session
-            .declare_arena_node(get_engine)
-            .await
-            .unwrap();
+        let node = session.declare_arena_node(get_engine).await.unwrap();
         // Node should be in SearchingHost state by default
         assert!(matches!(node.state, NodeStateInternal::SearchingHost));
     }
@@ -527,7 +586,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
         use crate::session_ext::SessionExt;
-        
+
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 

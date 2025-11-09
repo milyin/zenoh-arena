@@ -88,6 +88,11 @@ impl NodeRequest {
 
         Ok(())
     }
+
+    /// Get the client ID
+    pub fn client_id(&self) -> &NodeId {
+        &self.client_id
+    }
 }
 
 /// Wrapper for host discovery and connection requests
