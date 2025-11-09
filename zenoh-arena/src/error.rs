@@ -64,6 +64,10 @@ pub enum ArenaError {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    /// Liveliness token conflict - another token with same keyexpr already exists
+    #[error("Liveliness token conflict: {0}")]
+    LivelinessTokenConflict(String),
+
     /// IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

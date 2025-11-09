@@ -20,6 +20,10 @@ pub struct NodeLivelinessToken {
 
 impl NodeLivelinessToken {
     /// Declare a new liveliness token for a node
+    ///
+    /// Before creating the token, performs a liveliness.get() request to check if
+    /// another token with the same keyexpr already exists in the network.
+    /// If a conflict is detected, returns a LivelinessTokenConflict error.
     pub async fn declare(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
@@ -28,6 +32,22 @@ impl NodeLivelinessToken {
     ) -> Result<Self> {
         let node_keyexpr = NodeKeyexpr::new(prefix, role, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
+        
+        // Check if another token with the same keyexpr already exists
+        let replies = session
+            .liveliness()
+            .get(keyexpr.clone())
+            .await
+            .map_err(crate::error::ArenaError::Zenoh)?;
+        
+        // If we receive any liveliness tokens, it means another token already exists
+        if (replies.recv_async().await).is_ok() {
+            return Err(crate::error::ArenaError::LivelinessTokenConflict(
+                format!("Another liveliness token already exists for keyexpr: {}", keyexpr)
+            ));
+        }
+        
+        // No existing token found, declare the new one
         let token = session
             .liveliness()
             .declare_token(keyexpr)
