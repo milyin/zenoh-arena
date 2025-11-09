@@ -1,8 +1,14 @@
 /// Core types for the zenoh-arena library
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::error::{ArenaError, Result};
-use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, HostQueryable, Role};
+use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, Role};
+use futures::future::select_all;
+use futures::future::BoxFuture;
+use futures::future::FutureExt;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::task::JoinHandle;
 use zenoh::key_expr::KeyExpr;
 
 /// Unique node identifier
@@ -85,6 +91,9 @@ pub struct NodeInfo {
     pub connected_since: Instant,
 }
 
+/// Future type used to monitor client liveliness disconnect events
+type ClientDisconnectFuture = BoxFuture<'static, (NodeId, Result<()>)>;
+
 /// Public node state returned by step() method
 #[derive(Debug, Clone)]
 pub enum NodeState {
@@ -149,8 +158,7 @@ impl<S: std::fmt::Display> std::fmt::Display for NodeStatus<S> {
 }
 
 /// Current state of a Node (internal)
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) enum NodeStateInternal<E>
 where
     E: crate::node::GameEngine,
@@ -183,10 +191,14 @@ where
         liveliness_token: Option<NodeLivelinessToken>,
         /// Queryable for host discovery
         #[allow(dead_code)]
-        queryable: Option<HostQueryable>,
-        /// Liveliness watches for connected clients (maps client_id -> watch)
+        queryable: Option<Arc<HostQueryable>>,
+        /// Sender used to register new client disconnect monitors
+        client_disconnect_sender: UnboundedSender<ClientDisconnectFuture>,
+        /// Receiver yielding client disconnect events
+        client_disconnect_events: UnboundedReceiver<(NodeId, Result<()>)>,
+        /// Background task handling client disconnect monitoring
         #[allow(dead_code)]
-        client_liveliness_watches: std::collections::HashMap<NodeId, NodeLivelinessWatch>,
+        client_disconnect_task: JoinHandle<()>,
     },
 }
 
@@ -222,7 +234,7 @@ where
                 if queryable.is_none() {
                     return false;
                 }
-                
+
                 // Check if we have capacity
                 let max = engine.max_clients();
                 let current = connected_clients.len();
@@ -270,17 +282,24 @@ where
         let prefix = prefix.into();
 
         // Create host liveliness token for discovery
-        let token = NodeLivelinessToken::declare(session, prefix.clone(), Role::Host, node_id.clone()).await?;
+        let token =
+            NodeLivelinessToken::declare(session, prefix.clone(), Role::Host, node_id.clone())
+                .await?;
 
         // Declare queryable for host discovery
         let queryable = HostQueryable::declare(session, prefix.clone(), node_id.clone()).await?;
+
+        let (client_disconnect_sender, client_disconnect_events, client_disconnect_task) =
+            start_client_disconnect_monitor();
 
         *self = NodeStateInternal::Host {
             connected_clients: Vec::new(),
             engine,
             liveliness_token: Some(token),
-            queryable: Some(queryable),
-            client_liveliness_watches: std::collections::HashMap::new(),
+            queryable: Some(Arc::new(queryable)),
+            client_disconnect_sender,
+            client_disconnect_events,
+            client_disconnect_task,
         };
 
         Ok(())
@@ -298,23 +317,24 @@ where
         client_id: NodeId,
     ) -> Result<()> {
         use crate::network::NodeLivelinessWatch;
-        
+
         let prefix = prefix.into();
-        
+
         // Subscribe to liveliness events for the host
-        let liveliness_watch = NodeLivelinessWatch::subscribe(session, prefix.clone(), Role::Host, host_id.clone())
-            .await?;
-        
+        let liveliness_watch =
+            NodeLivelinessWatch::subscribe(session, prefix.clone(), Role::Host, host_id.clone())
+                .await?;
+
         // Declare client liveliness token (role: Client) so host can track our presence
-        let liveliness_token = NodeLivelinessToken::declare(session, prefix, Role::Client, client_id)
-            .await?;
+        let liveliness_token =
+            NodeLivelinessToken::declare(session, prefix, Role::Client, client_id).await?;
 
         *self = NodeStateInternal::Client {
             host_id,
             liveliness_watch,
             liveliness_token,
         };
-        
+
         Ok(())
     }
 }
@@ -354,6 +374,59 @@ where
     }
 }
 
+fn start_client_disconnect_monitor() -> (
+    UnboundedSender<ClientDisconnectFuture>,
+    UnboundedReceiver<(NodeId, Result<()>)>,
+    JoinHandle<()>,
+) {
+    let (watch_tx, mut watch_rx) = mpsc::unbounded_channel::<ClientDisconnectFuture>();
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<(NodeId, Result<()>)>();
+
+    let task = tokio::spawn(async move {
+        let mut pending: Vec<ClientDisconnectFuture> = Vec::new();
+
+        loop {
+            // Drain all new futures from the channel
+            while let Ok(fut) = watch_rx.try_recv() {
+                pending.push(fut);
+            }
+
+            if pending.is_empty() {
+                // Wait for at least one future
+                if let Some(fut) = watch_rx.recv().await {
+                    pending.push(fut);
+                } else {
+                    break;
+                }
+            }
+
+            // Wait for any pending future or a new one from the channel
+            let select_all_fut = select_all(std::mem::take(&mut pending)).fuse();
+            let watch_recv = Box::pin(watch_rx.recv()).fuse();
+            
+            futures::pin_mut!(select_all_fut, watch_recv);
+            
+            futures::select! {
+                (result, _idx, remaining) = select_all_fut => {
+                    pending = remaining;
+                    if event_tx.send(result).is_err() {
+                        break;
+                    }
+                }
+                opt_fut = watch_recv => {
+                    if let Some(fut) = opt_fut {
+                        pending.push(fut);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    (watch_tx, event_rx, task)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,7 +441,10 @@ mod tests {
     fn test_node_state_display_client() {
         let host_id = NodeId::from_name("test_host".to_string()).unwrap();
         let state = NodeState::Client { host_id };
-        assert_eq!(format!("{}", state), "Connected as client to host: test_host");
+        assert_eq!(
+            format!("{}", state),
+            "Connected as client to host: test_host"
+        );
     }
 
     #[test]
@@ -406,6 +482,9 @@ mod tests {
             state: NodeState::SearchingHost,
             game_state: Some("Level 5".to_string()),
         };
-        assert_eq!(format!("{}", status), "[State] Searching for host... | Game: Level 5");
+        assert_eq!(
+            format!("{}", status),
+            "[State] Searching for host... | Game: Level 5"
+        );
     }
 }

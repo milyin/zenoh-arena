@@ -1,8 +1,8 @@
 //! Liveliness token management
 
 use crate::error::Result;
-use crate::types::NodeId;
 use crate::network::keyexpr::{NodeKeyexpr, Role};
+use crate::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 use zenoh::liveliness::LivelinessToken;
 use zenoh::sample::SampleKind;
@@ -32,21 +32,22 @@ impl NodeLivelinessToken {
     ) -> Result<Self> {
         let node_keyexpr = NodeKeyexpr::new(prefix, role, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
-        
+
         // Check if another token with the same keyexpr already exists
         let replies = session
             .liveliness()
             .get(keyexpr.clone())
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
-        
+
         // If we receive any liveliness tokens, it means another token already exists
         if (replies.recv_async().await).is_ok() {
-            return Err(crate::error::ArenaError::LivelinessTokenConflict(
-                format!("Another liveliness token already exists for keyexpr: {}", keyexpr)
-            ));
+            return Err(crate::error::ArenaError::LivelinessTokenConflict(format!(
+                "Another liveliness token already exists for keyexpr: {}",
+                keyexpr
+            )));
         }
-        
+
         // No existing token found, declare the new one
         let token = session
             .liveliness()
@@ -67,7 +68,8 @@ impl NodeLivelinessToken {
 /// This is used by clients to detect when their connected host goes offline and needs
 /// to return to the host search stage.
 pub struct NodeLivelinessWatch {
-    subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
+    subscriber:
+        zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
     host_id: NodeId,
 }
 
@@ -92,14 +94,14 @@ impl NodeLivelinessWatch {
     ) -> Result<Self> {
         let node_keyexpr = NodeKeyexpr::new(prefix, role, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
-        
+
         let subscriber = session
             .liveliness()
             .declare_subscriber(keyexpr)
             .history(true)
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
-        
+
         Ok(Self {
             subscriber,
             host_id: node_id,
@@ -121,10 +123,7 @@ impl NodeLivelinessWatch {
                     match sample.kind() {
                         SampleKind::Put => {
                             // Host came online or re-established liveliness, continue waiting
-                            tracing::debug!(
-                                "Host '{}' liveliness put event",
-                                self.host_id
-                            );
+                            tracing::debug!("Host '{}' liveliness put event", self.host_id);
                         }
                         SampleKind::Delete => {
                             // Host went offline, liveliness lost

@@ -37,9 +37,9 @@
 //!
 //! This design allows a single queryable to handle both phases efficiently.
 
-use crate::types::NodeId;
 use crate::error::Result;
 use crate::network::keyexpr::{NodeKeyexpr, Role};
+use crate::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
 /// Helper for connecting to available hosts
@@ -81,7 +81,8 @@ impl HostQuerier {
         // Phase 1: Discover all available hosts
         // Query: <prefix>/link/*/client_id (glob on own_id, specific remote_id)
         // This queries all hosts in the arena, asking them to confirm presence
-        let discover_keyexpr = NodeKeyexpr::new(prefix.clone(), Role::Link, None, Some(client_id.clone()));
+        let discover_keyexpr =
+            NodeKeyexpr::new(prefix.clone(), Role::Link, None, Some(client_id.clone()));
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
@@ -116,15 +117,23 @@ impl HostQuerier {
             return Ok(None);
         }
 
-        tracing::info!("Discovered {} host(s), attempting connections", host_ids.len());
+        tracing::info!(
+            "Discovered {} host(s), attempting connections",
+            host_ids.len()
+        );
 
         // Phase 2: Try connecting to each discovered host
         // Query: <prefix>/link/<host_id>/<client_id> (specific own_id and remote_id)
         // This requests the specific host to confirm it accepts this client's connection
         for host_id in host_ids {
-            let connect_keyexpr = NodeKeyexpr::new(prefix.clone(), Role::Link, Some(host_id.clone()), Some(client_id.clone()));
+            let connect_keyexpr = NodeKeyexpr::new(
+                prefix.clone(),
+                Role::Link,
+                Some(host_id.clone()),
+                Some(client_id.clone()),
+            );
             let connect_keyexpr: KeyExpr = connect_keyexpr.into();
-            
+
             match session.get(connect_keyexpr).await {
                 Ok(connection_replies) => {
                     // Try to receive a positive response

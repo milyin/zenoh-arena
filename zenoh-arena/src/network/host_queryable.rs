@@ -45,8 +45,7 @@ impl HostRequest {
     ///
     /// Panics if query keyexpr is not NodeKeyexpr with Link role, Some own_id, and matching remote_id.
     pub fn new(query: Query, client_id: NodeId) -> Self {
-        let parsed = NodeKeyexpr::try_from(query.key_expr().clone())
-            .expect("Invalid NodeKeyexpr");
+        let parsed = NodeKeyexpr::try_from(query.key_expr().clone()).expect("Invalid NodeKeyexpr");
         assert_eq!(
             parsed.role(),
             Role::Link,
@@ -138,7 +137,8 @@ impl HostQueryable {
     ) -> Result<Self> {
         let prefix = prefix.into();
         // Declare on pattern: <prefix>/link/<host_id>/*
-        let host_client_keyexpr = NodeKeyexpr::new(prefix.clone(), Role::Link, Some(node_id.clone()), None);
+        let host_client_keyexpr =
+            NodeKeyexpr::new(prefix.clone(), Role::Link, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = host_client_keyexpr.into();
 
         // Declare queryable without callback
@@ -175,11 +175,9 @@ impl HostQueryable {
                     match (parsed.own_id(), parsed.remote_id()) {
                         (Some(own_id), Some(remote_id)) => {
                             assert_eq!(
-                                own_id,
-                                &self.node_id,
+                                own_id, &self.node_id,
                                 "Host ID mismatch: expected '{}', found '{}'",
-                                self.node_id,
-                                own_id
+                                self.node_id, own_id
                             );
                             // Connection request (specific own_id and remote_id): return it
                             return Ok(HostRequest::new(query, remote_id.clone()));

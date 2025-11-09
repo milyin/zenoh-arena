@@ -105,11 +105,12 @@ impl<'a, E: GameEngine, F: Fn() -> E> Resolvable for NodeBuilder<'a, E, F> {
     type To = Result<Node<E, F>>;
 }
 
-impl<'a, E: GameEngine, F: Fn() -> E + Send + 'a> std::future::IntoFuture for NodeBuilder<'a, E, F> {
+impl<'a, E: GameEngine, F: Fn() -> E + Send + 'a> std::future::IntoFuture
+    for NodeBuilder<'a, E, F>
+{
     type Output = <Self as Resolvable>::To;
-    type IntoFuture = std::pin::Pin<
-        Box<dyn std::future::Future<Output = Self::Output> + Send + 'a>,
-    >;
+    type IntoFuture =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Self::Output> + Send + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {

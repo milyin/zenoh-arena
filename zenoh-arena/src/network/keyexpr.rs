@@ -121,7 +121,7 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
         // Try to determine the role by looking backwards
         // For Link: [...prefix]/link/<own_id>/<remote_id> - at least 4 parts
         // For others: [...prefix]/<role>/<own_id> - at least 3 parts
-        
+
         // First, try to interpret as Link (4 parts minimum)
         if parts.len() >= 4 {
             let possible_role_str = parts[parts.len() - 3];
@@ -237,7 +237,12 @@ mod tests {
         let own_id = NodeId::from_name("host1".to_string()).unwrap();
         let remote_id = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, Some(own_id.clone()), Some(remote_id.clone()));
+        let link_keyexpr = NodeKeyexpr::new(
+            prefix,
+            Role::Link,
+            Some(own_id.clone()),
+            Some(remote_id.clone()),
+        );
         assert_eq!(link_keyexpr.own_id(), &Some(own_id));
         assert_eq!(link_keyexpr.remote_id(), &Some(remote_id));
         assert_eq!(link_keyexpr.prefix().as_str(), "arena/game1");
@@ -249,7 +254,12 @@ mod tests {
         let own_id = NodeId::from_name("host1".to_string()).unwrap();
         let remote_id = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, Some(own_id.clone()), Some(remote_id.clone()));
+        let link_keyexpr = NodeKeyexpr::new(
+            prefix,
+            Role::Link,
+            Some(own_id.clone()),
+            Some(remote_id.clone()),
+        );
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/client1");
