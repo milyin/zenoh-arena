@@ -48,6 +48,10 @@ impl GameEngine for BonjourEngine {
         self.state.counter += 1;
         Ok(self.state.clone())
     }
+
+    fn max_clients(&self) -> Option<usize> {
+        None // No limit on clients
+    }
 }
 
 // Implement zenoh-ext serialization for BonjourAction

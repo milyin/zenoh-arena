@@ -296,9 +296,7 @@ pub trait GameEngine: Send + Sync {
     fn process_action(&mut self, action: Self::Action, client_id: &NodeId) -> Result<Self::State>;
 
     /// Maximum number of clients allowed (None = unlimited)
-    fn max_clients(&self) -> Option<usize> {
-        Some(4) // Default to 4 clients
-    }
+    fn max_clients(&self) -> Option<usize>;
 }
 
 #[cfg(test)]
@@ -319,6 +317,10 @@ mod tests {
             _client_id: &NodeId,
         ) -> Result<Self::State> {
             Ok("processed".to_string())
+        }
+
+        fn max_clients(&self) -> Option<usize> {
+            Some(4)
         }
     }
 
