@@ -116,20 +116,66 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         // Dispatch based on current state
         match self.state {
             NodeStateInternal::SearchingHost => self.search_for_host().await,
-            NodeStateInternal::Client { .. } | NodeStateInternal::Host { .. } => {
-                self.process_actions().await
+            NodeStateInternal::Client { .. } => self.process_client().await,
+            NodeStateInternal::Host { .. } => self.process_host().await,
+        }
+    }
+
+    /// Process actions when in Client state
+    ///
+    /// Handles commands from the command channel while connected to a host.
+    /// Returns when either:
+    /// - The step timeout elapses
+    /// - A Stop command is received (returns None)
+    async fn process_client(&mut self) -> Result<Option<NodeStatus<E::State>>> {
+        let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
+        let sleep = tokio::time::sleep(timeout);
+        tokio::pin!(sleep);
+
+        // Process commands until timeout or shutdown
+        loop {
+            tokio::select! {
+                // Timeout elapsed
+                () = &mut sleep => {
+                    return Ok(Some(NodeStatus {
+                        state: NodeState::from(&self.state),
+                        game_state: None,
+                    }));
+                }
+                // Command received
+                result = self.command_rx.recv_async() => match result {
+                    Err(_) => {
+                        tracing::info!("Node '{}' command channel closed", self.id);
+                        return Ok(None);
+                    }
+                    Ok(NodeCommand::Stop) => {
+                        tracing::info!("Node '{}' received Stop command, exiting", self.id);
+                        return Ok(None);
+                    }
+                    Ok(NodeCommand::GameAction(_action)) => {
+                        if let NodeStateInternal::Client { host_id } = &self.state {
+                            tracing::debug!(
+                                "Node '{}' forwarding action to host '{}'",
+                                self.id,
+                                host_id
+                            );
+                            // TODO: Forward action to remote host via Zenoh pub/sub
+                            // Placeholder for Phase 4 implementation
+                        }
+                    }
+                }
             }
         }
     }
 
-    /// Process actions when in Client or Host state
+    /// Process actions when in Host state
     ///
-    /// Handles commands from the command channel and processes game actions.
+    /// Handles commands from the command channel and processes game actions through the engine.
     /// Returns when either:
-    /// - A new game state is produced by the engine (Host mode)
+    /// - A new game state is produced by the engine
     /// - The step timeout elapses
     /// - A Stop command is received (returns None)
-    async fn process_actions(&mut self) -> Result<Option<NodeStatus<E::State>>> {
+    async fn process_host(&mut self) -> Result<Option<NodeStatus<E::State>>> {
         let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
@@ -139,7 +185,6 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             tokio::select! {
                 // Timeout elapsed
                 () = &mut sleep => {
-                    // Build the node state info using From trait
                     return Ok(Some(NodeStatus {
                         state: NodeState::from(&self.state),
                         game_state: None,
@@ -148,7 +193,6 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 // Command received
                 result = self.command_rx.recv_async() => match result {
                     Err(_) => {
-                        // Channel disconnected
                         tracing::info!("Node '{}' command channel closed", self.id);
                         return Ok(None);
                     }
@@ -157,37 +201,18 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                         return Ok(None);
                     }
                     Ok(NodeCommand::GameAction(action)) => {
-                        // Process action based on current state
-                        match &mut self.state {
-                            NodeStateInternal::SearchingHost => {
-                                // This should not happen due to the check in step()
-                                tracing::warn!(
-                                    "Node '{}' received action while searching for host, ignoring",
-                                    self.id
-                                );
-                            }
-                            NodeStateInternal::Client { host_id } => {
-                                tracing::debug!(
-                                    "Node '{}' forwarding action to host '{}'",
-                                    self.id,
-                                    host_id
-                                );
-                                // TODO: Forward action to remote host via Zenoh pub/sub
-                                // Placeholder for Phase 4 implementation
-                            }
-                            NodeStateInternal::Host { engine, .. } => {
-                                tracing::debug!(
-                                    "Node '{}' processing action in host mode",
-                                    self.id
-                                );
-                                // Process action directly in the engine and get new state
-                                let new_game_state = engine.process_action(action, &self.id)?;
-                                // Build the node state info using From trait
-                                return Ok(Some(NodeStatus {
-                                    state: NodeState::from(&self.state),
-                                    game_state: Some(new_game_state),
-                                }));
-                            }
+                        if let NodeStateInternal::Host { engine, .. } = &mut self.state {
+                            tracing::debug!(
+                                "Node '{}' processing action in host mode",
+                                self.id
+                            );
+                            // Process action directly in the engine and get new state
+                            let new_game_state = engine.process_action(action, &self.id)?;
+                            // Build the node state info using From trait
+                            return Ok(Some(NodeStatus {
+                                state: NodeState::from(&self.state),
+                                game_state: Some(new_game_state),
+                            }));
                         }
                     }
                 }
