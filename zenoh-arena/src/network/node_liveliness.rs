@@ -68,9 +68,10 @@ impl NodeLivelinessToken {
 /// This is used by clients to detect when their connected host goes offline and needs
 /// to return to the host search stage.
 pub struct NodeLivelinessWatch {
-    subscribers: Vec<
+    subscribers: Vec<(
+        NodeId,
         zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
-    >,
+    )>,
     host_id: NodeId,
 }
 
@@ -114,7 +115,7 @@ impl NodeLivelinessWatch {
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
 
-        self.subscribers.push(subscriber);
+        self.subscribers.push((node_id.clone(), subscriber));
         Ok(())
     }
 
@@ -144,23 +145,23 @@ impl NodeLivelinessWatch {
         // Process all subscribers and wait for any to disconnect
         loop {
             // Check each subscriber for disconnect event
-            for subscriber in self.subscribers.iter_mut() {
+            for (node_id, subscriber) in self.subscribers.iter_mut() {
                 match subscriber.try_recv() {
                     Ok(Some(sample)) => {
                         match sample.kind() {
                             SampleKind::Delete => {
-                                // Host went offline, liveliness lost
+                                // Node went offline, liveliness lost
                                 tracing::info!(
-                                    "Host '{}' liveliness lost - disconnecting",
-                                    self.host_id
+                                    "Node '{}' liveliness lost - disconnecting",
+                                    node_id
                                 );
-                                return Ok(self.host_id.clone());
+                                return Ok(node_id.clone());
                             }
                             SampleKind::Put => {
-                                // Host came online or re-established liveliness, continue waiting
+                                // Node came online or re-established liveliness, continue waiting
                                 tracing::debug!(
-                                    "Host '{}' liveliness put event",
-                                    self.host_id
+                                    "Node '{}' liveliness put event",
+                                    node_id
                                 );
                             }
                         }
@@ -170,12 +171,12 @@ impl NodeLivelinessWatch {
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Liveliness subscription error for host '{}': {}",
-                            self.host_id,
+                            "Liveliness subscription error for node '{}': {}",
+                            node_id,
                             e
                         );
                         // Subscription error is treated as disconnect
-                        return Ok(self.host_id.clone());
+                        return Ok(node_id.clone());
                     }
                 }
             }

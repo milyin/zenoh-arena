@@ -50,7 +50,7 @@ impl GameEngine for BonjourEngine {
     }
 
     fn max_clients(&self) -> Option<usize> {
-        None // No limit on clients
+        Some(2)
     }
 }
 
