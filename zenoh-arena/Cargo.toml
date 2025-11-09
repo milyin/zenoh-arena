@@ -13,3 +13,4 @@ uuid = { workspace = true }
 bs58 = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
+futures = { workspace = true }

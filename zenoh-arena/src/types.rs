@@ -166,6 +166,9 @@ where
         host_id: NodeId,
         /// Watches for host liveliness to detect disconnection
         liveliness_watch: NodeLivelinessWatch,
+        /// Client's liveliness token (role: Client) for the host to track disconnection
+        #[allow(dead_code)]
+        liveliness_token: NodeLivelinessToken,
     },
 
     /// Acting as host
@@ -181,6 +184,9 @@ where
         /// Queryable for host discovery
         #[allow(dead_code)]
         queryable: Option<HostQueryable>,
+        /// Liveliness watches for connected clients (maps client_id -> watch)
+        #[allow(dead_code)]
+        client_liveliness_watches: std::collections::HashMap<NodeId, NodeLivelinessWatch>,
     },
 }
 
@@ -274,6 +280,7 @@ where
             engine,
             liveliness_token: Some(token),
             queryable: Some(queryable),
+            client_liveliness_watches: std::collections::HashMap::new(),
         };
 
         Ok(())
@@ -281,23 +288,31 @@ where
 
     /// Transition from SearchingHost to Client state
     ///
-    /// Subscribes to liveliness events for the host
+    /// Subscribes to liveliness events for the host and declares a client liveliness token
     #[allow(dead_code)]
     pub async fn client(
         &mut self,
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
+        client_id: NodeId,
     ) -> Result<()> {
         use crate::network::NodeLivelinessWatch;
         
+        let prefix = prefix.into();
+        
         // Subscribe to liveliness events for the host
-        let liveliness_watch = NodeLivelinessWatch::subscribe(session, prefix, Role::Host, host_id.clone())
+        let liveliness_watch = NodeLivelinessWatch::subscribe(session, prefix.clone(), Role::Host, host_id.clone())
+            .await?;
+        
+        // Declare client liveliness token (role: Client) so host can track our presence
+        let liveliness_token = NodeLivelinessToken::declare(session, prefix, Role::Client, client_id)
             .await?;
 
         *self = NodeStateInternal::Client {
             host_id,
             liveliness_watch,
+            liveliness_token,
         };
         
         Ok(())

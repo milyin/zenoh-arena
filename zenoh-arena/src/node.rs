@@ -149,11 +149,12 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// - A Stop command is received (returns None)
     async fn process_client(&mut self) -> Result<Option<NodeStatus<E::State>>> {
         // Extract the client state data temporarily to use the liveliness watch
-        let (host_id, mut liveliness_watch) = match std::mem::take(&mut self.state) {
+        let (host_id, mut liveliness_watch, _liveliness_token) = match std::mem::take(&mut self.state) {
             NodeStateInternal::Client {
                 host_id,
                 liveliness_watch,
-            } => (host_id, liveliness_watch),
+                liveliness_token,
+            } => (host_id, liveliness_watch, liveliness_token),
             other_state => {
                 // Restore state if it wasn't Client
                 self.state = other_state;
@@ -177,6 +178,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     self.state = NodeStateInternal::Client {
                         host_id: host_id.clone(),
                         liveliness_watch,
+                        liveliness_token: _liveliness_token,
                     };
                     return Ok(Some(NodeStatus {
                         state: NodeState::from(&self.state),
@@ -371,7 +373,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         // Handle connection result - state transition after select!
         if let Some(host_id) = connected_host {
             self.state
-                .client(&self.session, self.config.keyexpr_prefix.clone(), host_id)
+                .client(&self.session, self.config.keyexpr_prefix.clone(), host_id, self.id.clone())
                 .await?;
             Ok(Some(NodeStatus {
                 state: NodeState::from(&self.state),
