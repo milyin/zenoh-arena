@@ -190,6 +190,13 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                         game_state: None,
                     }));
                 }
+                // Query received from a client
+                query_result = self.receive_query() => {
+                    if let Some(_query) = query_result {
+                        tracing::debug!("Node '{}' received query from client", self.id);
+                        // TODO: Process query and send response with host info
+                    }
+                }
                 // Command received
                 result = self.command_rx.recv_async() => match result {
                     Err(_) => {
@@ -218,6 +225,18 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 }
             }
         }
+    }
+
+    /// Receive a query from the host's queryable
+    ///
+    /// Returns Some(query) if a query was received, None if no query is available
+    async fn receive_query(&self) -> Option<zenoh::query::Query> {
+        if let NodeStateInternal::Host { queryable, .. } = &self.state {
+            if let Some(q) = queryable {
+                return q.receiver().recv_async().await.ok();
+            }
+        }
+        None
     }
 
     /// Search for available hosts (called when in SearchingHost state)

@@ -11,7 +11,6 @@ use zenoh::handlers::FifoChannelHandler;
 /// to discover and connect to this host via queries.
 #[derive(Debug)]
 pub struct NodeQueryable {
-    #[allow(dead_code)]
     queryable: Queryable<FifoChannelHandler<Query>>,
     #[allow(dead_code)]
     node_id: NodeId,
@@ -32,5 +31,10 @@ impl NodeQueryable {
             .await?;
 
         Ok(Self { queryable, node_id })
+    }
+
+    /// Get a receiver for incoming queries
+    pub fn receiver(&self) -> &FifoChannelHandler<Query> {
+        self.queryable.handler()
     }
 }
