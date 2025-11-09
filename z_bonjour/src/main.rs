@@ -4,6 +4,7 @@ use clap::Parser;
 use engine::{BonjourAction, BonjourEngine};
 use std::io::{self, Read};
 use std::path::PathBuf;
+use zenoh::key_expr::KeyExpr;
 use zenoh_arena::{NodeCommand, SessionExt};
 
 /// z_bonjour - Zenoh Arena Demo
@@ -16,7 +17,7 @@ struct Args {
 
     /// Key expression prefix
     #[arg(short, long)]
-    prefix: Option<String>,
+    prefix: Option<KeyExpr<'static>>,
 
     /// Force host mode
     #[arg(short, long, default_value = "true")]
@@ -56,11 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .step_timeout_ms(1000);
 
     // Apply prefix if provided
-    let prefix_str = args.prefix.clone();
-    if let Some(prefix) = args.prefix {
-        let prefix_keyexpr: zenoh::key_expr::KeyExpr<'static> = prefix.try_into()
-            .map_err(|e| format!("Invalid prefix key expression: {}", e))?;
-        node_builder = node_builder.prefix(prefix_keyexpr);
+    if let Some(prefix) = args.prefix.clone() {
+        node_builder = node_builder.prefix(prefix);
     }
 
     let mut node = node_builder.await?;
@@ -69,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Node name: {}", args.name);
     println!("Node ID: {}", node.id());
     println!("Force host: {}", args.force_host);
-    if let Some(prefix) = prefix_str {
+    if let Some(ref prefix) = args.prefix {
         println!("Prefix: {}", prefix);
     }
     println!("Commands:");
