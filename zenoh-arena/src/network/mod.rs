@@ -1,12 +1,12 @@
 //! Network layer for zenoh-arena
 
 pub mod keyexpr;
-pub mod node_liveliness;
-pub mod node_querier;
-pub mod node_queryable;
+pub mod host_liveliness;
+pub mod host_querier;
+pub mod host_queryable;
 
 #[allow(unused_imports)]
 pub use keyexpr::{HostKeyexpr, HostClientKeyexpr};
-pub use node_liveliness::{NodeLivelinessToken, NodeLivelinessWatch};
-pub use node_querier::NodeQuerier;
-pub use node_queryable::NodeQueryable;
+pub use host_liveliness::{HostLivelinessToken, HostLivelinessWatch};
+pub use host_querier::HostQuerier;
+pub use host_queryable::HostQueryable;

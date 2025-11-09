@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
-use crate::network::node_queryable::NodeRequest;
+use crate::network::host_queryable::HostRequest;
 use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
 
 /// Commands that can be sent to the node
@@ -292,7 +292,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Uses NodeQuerier to find and connect to available hosts. If timeout expires or
     /// no hosts are available/accept connection, transitions to Host state.
     async fn search_for_host(&mut self) -> Result<Option<NodeStatus<E::State>>> {
-        use crate::network::NodeQuerier;
+        use crate::network::HostQuerier;
 
         tracing::info!("Node '{}' searching for hosts...", self.id);
 
@@ -313,7 +313,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     break None;
                 }
                 // Try to connect to available hosts
-                connection_result = NodeQuerier::connect(&self.session, &self.config.keyexpr_prefix, self.id.clone()) => {
+                connection_result = HostQuerier::connect(&self.session, &self.config.keyexpr_prefix, self.id.clone()) => {
                     match connection_result {
                         Ok(Some(host_id)) => {
                             // Successfully connected to a host
@@ -379,7 +379,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     ///
     /// Checks if the node is in host mode and if the current client count is below the maximum.
     /// Accepts the connection if capacity is available, otherwise rejects it.
-    async fn handle_connection_request(&mut self, request: NodeRequest) -> Result<()> {
+    async fn handle_connection_request(&mut self, request: HostRequest) -> Result<()> {
         let NodeStateInternal::Host {
             engine,
             connected_clients,

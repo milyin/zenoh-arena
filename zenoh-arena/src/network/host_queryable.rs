@@ -33,12 +33,12 @@ use zenoh::query::{Query, Queryable};
 /// Wraps a Zenoh Query with methods to accept or reject the connection request.
 /// The host handler calls either `accept()` or `reject()` to respond to the client.
 #[derive(Debug, Clone)]
-pub struct NodeRequest {
+pub struct HostRequest {
     query: Query,
     client_id: NodeId,
 }
 
-impl NodeRequest {
+impl HostRequest {
     /// Create a new NodeRequest from a Query and client_id
     ///
     /// # Panics
@@ -112,7 +112,7 @@ impl NodeRequest {
 /// - Connection queries: `<prefix>/host/<host_id>/<client_id>` (specific both)
 ///   → Returns NodeRequest for host to accept/reject
 #[derive(Debug)]
-pub struct NodeQueryable {
+pub struct HostQueryable {
     /// The zenoh queryable that receives queries
     queryable: Queryable<zenoh::handlers::FifoChannelHandler<Query>>,
     /// Node ID for formatting replies
@@ -121,7 +121,7 @@ pub struct NodeQueryable {
     prefix: KeyExpr<'static>,
 }
 
-impl NodeQueryable {
+impl HostQueryable {
     /// Declare a new queryable for a host node
     ///
     /// Declares queryable on `<prefix>/host/<host_id>/*` pattern.
@@ -152,7 +152,7 @@ impl NodeQueryable {
     /// Loops receiving queries from the queryable. For each query:
     /// - If it's a discovery query (glob client_id): replies with ok
     /// - If it's a connection query (specific client_id): returns NodeRequest
-    pub async fn expect_connection(&self) -> Result<NodeRequest> {
+    pub async fn expect_connection(&self) -> Result<HostRequest> {
         loop {
             // Receive next query from queryable
             let query = self.queryable.recv_async().await.map_err(|_| {
@@ -175,7 +175,7 @@ impl NodeQueryable {
                                 host_id
                             );
                             // Connection request (specific host id and client_id): return it
-                            return Ok(NodeRequest::new(query, client_id.clone()));
+                            return Ok(HostRequest::new(query, client_id.clone()));
                         }
                         (Some(host_id), None) => {
                             // ignore invalid case: specific host_id but glob client_id

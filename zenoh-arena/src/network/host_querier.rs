@@ -48,9 +48,9 @@ use zenoh::key_expr::KeyExpr;
 /// 1. Discover all available hosts
 /// 2. Attempt connection to each host until one succeeds
 #[derive(Debug)]
-pub struct NodeQuerier;
+pub struct HostQuerier;
 
-impl NodeQuerier {
+impl HostQuerier {
     /// Connect to an available host
     ///
     /// Performs two-phase discovery and connection:

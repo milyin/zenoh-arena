@@ -2,7 +2,7 @@
 use std::time::Instant;
 
 use crate::error::{ArenaError, Result};
-use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, NodeQueryable};
+use crate::network::{HostLivelinessToken, HostLivelinessWatch, HostQueryable};
 use zenoh::key_expr::KeyExpr;
 
 /// Unique node identifier
@@ -165,7 +165,7 @@ where
         /// ID of the host we're connected to
         host_id: NodeId,
         /// Watches for host liveliness to detect disconnection
-        liveliness_watch: NodeLivelinessWatch,
+        liveliness_watch: HostLivelinessWatch,
     },
 
     /// Acting as host
@@ -177,10 +177,10 @@ where
         engine: E,
         /// Liveliness token
         #[allow(dead_code)]
-        liveliness_token: Option<NodeLivelinessToken>,
+        liveliness_token: Option<HostLivelinessToken>,
         /// Queryable for host discovery
         #[allow(dead_code)]
-        queryable: Option<NodeQueryable>,
+        queryable: Option<HostQueryable>,
     },
 }
 
@@ -262,10 +262,10 @@ where
         E: crate::node::GameEngine,
     {
         // Create liveliness token
-        let token = NodeLivelinessToken::declare(session, prefix, node_id.clone()).await?;
+        let token = HostLivelinessToken::declare(session, prefix, node_id.clone()).await?;
 
         // Declare queryable for host discovery
-        let queryable = NodeQueryable::declare(session, prefix, node_id.clone()).await?;
+        let queryable = HostQueryable::declare(session, prefix, node_id.clone()).await?;
 
         *self = NodeStateInternal::Host {
             connected_clients: Vec::new(),
@@ -311,7 +311,7 @@ where
             match (has_queryable, has_capacity) {
                 // Has capacity and no queryable: create queryable
                 (false, true) => {
-                    let new_queryable = NodeQueryable::declare(session, prefix, node_id.clone()).await?;
+                    let new_queryable = HostQueryable::declare(session, prefix, node_id.clone()).await?;
                     *queryable = Some(new_queryable);
                     tracing::debug!("Host '{}' now accepting clients (created queryable)", node_id);
                 }
@@ -336,10 +336,10 @@ where
         prefix: &KeyExpr<'_>,
         host_id: NodeId,
     ) -> Result<()> {
-        use crate::network::NodeLivelinessWatch;
+        use crate::network::HostLivelinessWatch;
         
         // Subscribe to liveliness events for the host
-        let liveliness_watch = NodeLivelinessWatch::subscribe(session, prefix, host_id.clone())
+        let liveliness_watch = HostLivelinessWatch::subscribe(session, prefix, host_id.clone())
             .await?;
 
         *self = NodeStateInternal::Client {

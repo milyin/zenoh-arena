@@ -11,15 +11,15 @@ use zenoh::sample::SampleKind;
 ///
 /// The token is automatically undeclared when dropped.
 #[derive(Debug)]
-pub struct NodeLivelinessToken {
+pub struct HostLivelinessToken {
     #[allow(dead_code)]
     token: LivelinessToken,
     #[allow(dead_code)]
     node_id: NodeId,
 }
 
-impl NodeLivelinessToken {
-    /// Declare a new liveliness token for a node
+impl HostLivelinessToken {
+    /// Declare a new liveliness token for a host node
     pub async fn declare(
         session: &zenoh::Session,
         prefix: &KeyExpr<'_>,
@@ -45,12 +45,12 @@ impl NodeLivelinessToken {
 ///
 /// This is used by clients to detect when their connected host goes offline and needs
 /// to return to the host search stage.
-pub struct NodeLivelinessWatch {
+pub struct HostLivelinessWatch {
     subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
     host_id: NodeId,
 }
 
-impl std::fmt::Debug for NodeLivelinessWatch {
+impl std::fmt::Debug for HostLivelinessWatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeLivelinessWatch")
             .field("host_id", &self.host_id)
@@ -58,7 +58,7 @@ impl std::fmt::Debug for NodeLivelinessWatch {
     }
 }
 
-impl NodeLivelinessWatch {
+impl HostLivelinessWatch {
     /// Subscribe to liveliness events for a host node
     ///
     /// Creates a liveliness subscriber that tracks the presence of the specified host.
@@ -74,6 +74,7 @@ impl NodeLivelinessWatch {
         let subscriber = session
             .liveliness()
             .declare_subscriber(keyexpr)
+            .history(true)
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
         
