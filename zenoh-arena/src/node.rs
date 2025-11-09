@@ -191,8 +191,8 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 // Host liveliness lost - disconnect and return to searching
                 disconnect_result = liveliness_watch.disconnected() => {
                     match disconnect_result {
-                        Ok(()) => {
-                            tracing::info!("Node '{}' detected host disconnection, returning to search", self.id);
+                        Ok(disconnected_id) => {
+                            tracing::info!("Node '{}' detected host '{}' disconnection, returning to search", self.id, disconnected_id);
                             // Transition back to SearchingHost
                             self.state = NodeStateInternal::SearchingHost;
                             return Ok(Some(NodeStatus {
@@ -485,18 +485,19 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     // Register liveliness watch for the client so we can detect disconnects
                     let client_id_for_watch = client_id.clone();
 
-                    match NodeLivelinessWatch::subscribe(
-                        &self.session,
-                        self.config.keyexpr_prefix.clone(),
-                        crate::network::Role::Client,
-                        client_id_for_watch.clone(),
-                    )
-                    .await
+                    let mut watch = NodeLivelinessWatch::new(client_id_for_watch.clone());
+                    match watch
+                        .subscribe(
+                            &self.session,
+                            self.config.keyexpr_prefix.clone(),
+                            crate::network::Role::Client,
+                            &client_id_for_watch,
+                        )
+                        .await
                     {
-                        Ok(watch) => {
-                            let future: futures::future::BoxFuture<'static, (NodeId, Result<()>)> =
+                        Ok(()) => {
+                            let future: futures::future::BoxFuture<'static, (NodeId, Result<NodeId>)> =
                                 async move {
-                                    let mut watch = watch;
                                     let result = watch.disconnected().await;
                                     (client_id_for_watch, result)
                                 }
@@ -550,7 +551,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     async fn handle_client_disconnect(
         &mut self,
         client_id: NodeId,
-        disconnect_result: Result<()>,
+        disconnect_result: Result<NodeId>,
     ) -> Result<()> {
         let NodeStateInternal::Host {
             connected_clients,
@@ -563,10 +564,11 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         };
 
         match disconnect_result {
-            Ok(()) => tracing::info!(
-                "Node '{}' detected client '{}' disconnect",
+            Ok(disconnected_id) => tracing::info!(
+                "Node '{}' detected client '{}' disconnect (liveliness watch returned: {})",
                 self.id,
-                client_id
+                client_id,
+                disconnected_id
             ),
             Err(e) => tracing::warn!(
                 "Node '{}' client '{}' liveliness error: {}",

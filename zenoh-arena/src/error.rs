@@ -68,6 +68,10 @@ pub enum ArenaError {
     #[error("Liveliness token conflict: {0}")]
     LivelinessTokenConflict(String),
 
+    /// Liveliness watch error
+    #[error("Liveliness error: {0}")]
+    LivelinessError(String),
+
     /// IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

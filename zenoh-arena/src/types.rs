@@ -88,7 +88,7 @@ pub struct NodeInfo {
 }
 
 /// Future type used to monitor client liveliness disconnect events
-type ClientDisconnectFuture = BoxFuture<'static, (NodeId, Result<()>)>;
+type ClientDisconnectFuture = BoxFuture<'static, (NodeId, Result<NodeId>)>;
 
 /// Public node state returned by step() method
 #[derive(Debug, Clone)]
@@ -328,10 +328,11 @@ where
 
         let prefix = prefix.into();
 
-        // Subscribe to liveliness events for the host
-        let liveliness_watch =
-            NodeLivelinessWatch::subscribe(session, prefix.clone(), Role::Host, host_id.clone())
-                .await?;
+        // Create and subscribe to liveliness events for the host
+        let mut liveliness_watch = NodeLivelinessWatch::new(host_id.clone());
+        liveliness_watch
+            .subscribe(session, prefix.clone(), Role::Host, &host_id)
+            .await?;
 
         // Declare client liveliness token (role: Client) so host can track our presence
         let liveliness_token =

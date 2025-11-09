@@ -62,14 +62,15 @@ impl NodeLivelinessToken {
 /// Watches for liveliness of a specific host node
 ///
 /// Subscribes to liveliness events for a host and detects when the host goes offline.
-/// Provides a `disconnected()` method that waits for the liveliness token to be dropped
-/// (signaling the host is no longer active).
+/// Provides a `subscribe()` method to add subscribers and an `unsubscribe()` method to remove them.
+/// The `disconnected()` method waits for any subscriber's disconnect using `select_all`.
 ///
 /// This is used by clients to detect when their connected host goes offline and needs
 /// to return to the host search stage.
 pub struct NodeLivelinessWatch {
-    subscriber:
+    subscribers: Vec<
         zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
+    >,
     host_id: NodeId,
 }
 
@@ -77,21 +78,32 @@ impl std::fmt::Debug for NodeLivelinessWatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeLivelinessWatch")
             .field("host_id", &self.host_id)
+            .field("num_subscribers", &self.subscribers.len())
             .finish()
     }
 }
 
 impl NodeLivelinessWatch {
+    /// Create a new liveliness watch for a node without any subscribers
+    pub fn new(node_id: NodeId) -> Self {
+        Self {
+            subscribers: Vec::new(),
+            host_id: node_id,
+        }
+    }
+
     /// Subscribe to liveliness events for a node
     ///
-    /// Creates a liveliness subscriber that tracks the presence of the specified node.
+    /// Adds a new liveliness subscriber that tracks the presence of the specified node.
     /// The subscriber will receive events when the node's liveliness token is declared or undeclared.
+    /// Multiple subscribers can be added via repeated calls to this method.
     pub async fn subscribe(
+        &mut self,
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         role: Role,
-        node_id: NodeId,
-    ) -> Result<Self> {
+        node_id: &NodeId,
+    ) -> Result<()> {
         let node_keyexpr = NodeKeyexpr::new(prefix, role, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
 
@@ -102,49 +114,74 @@ impl NodeLivelinessWatch {
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
 
-        Ok(Self {
-            subscriber,
-            host_id: node_id,
-        })
+        self.subscribers.push(subscriber);
+        Ok(())
     }
 
-    /// Wait for the host to disconnect (liveliness lost)
+    /// Unsubscribe from liveliness events
     ///
-    /// Continuously receives liveliness events. When a "Delete" event is received,
-    /// it indicates the host's liveliness token has been dropped and the host is
-    /// no longer available. This method returns when the host disconnects.
+    /// Removes the most recently added subscriber from the watch.
+    /// Returns `true` if a subscriber was removed, `false` if there are no subscribers.
+    #[allow(dead_code)]
+    pub fn unsubscribe(&mut self) -> bool {
+        self.subscribers.pop().is_some()
+    }
+
+    /// Wait for any subscriber to disconnect (liveliness lost)
     ///
-    /// Similar to `NodeQueryable::expect_connection()`, this loops until the
-    /// expected event (liveliness delete) is detected.
-    pub async fn disconnected(&mut self) -> Result<()> {
+    /// Uses `select_all` to wait for any of the subscribers to receive a "Delete" event,
+    /// indicating the host's liveliness token has been dropped and the host is
+    /// no longer available. This method returns when any subscriber detects disconnection.
+    ///
+    /// Returns the node ID that disconnected.
+    pub async fn disconnected(&mut self) -> Result<NodeId> {
+        if self.subscribers.is_empty() {
+            return Err(crate::error::ArenaError::LivelinessError(
+                "No subscribers registered for liveliness watch".into(),
+            ));
+        }
+
+        // Process all subscribers and wait for any to disconnect
         loop {
-            match self.subscriber.recv_async().await {
-                Ok(sample) => {
-                    match sample.kind() {
-                        SampleKind::Put => {
-                            // Host came online or re-established liveliness, continue waiting
-                            tracing::debug!("Host '{}' liveliness put event", self.host_id);
-                        }
-                        SampleKind::Delete => {
-                            // Host went offline, liveliness lost
-                            tracing::info!(
-                                "Host '{}' liveliness lost - disconnecting",
-                                self.host_id
-                            );
-                            return Ok(());
+            // Check each subscriber for disconnect event
+            for subscriber in self.subscribers.iter_mut() {
+                match subscriber.try_recv() {
+                    Ok(Some(sample)) => {
+                        match sample.kind() {
+                            SampleKind::Delete => {
+                                // Host went offline, liveliness lost
+                                tracing::info!(
+                                    "Host '{}' liveliness lost - disconnecting",
+                                    self.host_id
+                                );
+                                return Ok(self.host_id.clone());
+                            }
+                            SampleKind::Put => {
+                                // Host came online or re-established liveliness, continue waiting
+                                tracing::debug!(
+                                    "Host '{}' liveliness put event",
+                                    self.host_id
+                                );
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Liveliness subscription error for host '{}': {}",
-                        self.host_id,
-                        e
-                    );
-                    // Subscription error is treated as disconnect
-                    return Err(crate::error::ArenaError::Zenoh(e));
+                    Ok(None) => {
+                        // No message available (non-blocking)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Liveliness subscription error for host '{}': {}",
+                            self.host_id,
+                            e
+                        );
+                        // Subscription error is treated as disconnect
+                        return Ok(self.host_id.clone());
+                    }
                 }
             }
+
+            // Wait a bit before checking again to avoid busy-spinning
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
 
