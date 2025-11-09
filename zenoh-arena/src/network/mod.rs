@@ -7,6 +7,6 @@ pub mod node_queryable;
 
 #[allow(unused_imports)]
 pub use keyexpr::{HostKeyexpr, HostClientKeyexpr};
-pub use node_liveliness::NodeLivelinessToken;
+pub use node_liveliness::{NodeLivelinessToken, NodeLivelinessWatch};
 pub use node_querier::NodeQuerier;
 pub use node_queryable::NodeQueryable;

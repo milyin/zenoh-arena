@@ -127,23 +127,80 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Process actions when in Client state
     ///
     /// Handles commands from the command channel while connected to a host.
+    /// Monitors liveliness of the connected host and returns to SearchingHost if disconnected.
     /// Returns when either:
+    /// - Host liveliness is lost (transitions back to SearchingHost)
     /// - The step timeout elapses
     /// - A Stop command is received (returns None)
     async fn process_client(&mut self) -> Result<Option<NodeStatus<E::State>>> {
+        // Extract the host_id and take ownership of liveliness watch
+        let (host_id, liveliness_watch) = match std::mem::take(&mut self.state) {
+            NodeStateInternal::Client { host_id, liveliness_watch } => {
+                (host_id, liveliness_watch)
+            }
+            _ => {
+                // Restore the state if it's not Client (shouldn't happen)
+                return Ok(Some(NodeStatus {
+                    state: NodeState::from(&self.state),
+                    game_state: None,
+                }));
+            }
+        };
+
         let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
 
-        // Process commands until timeout or shutdown
+        // Prepare the liveliness disconnection future
+        // Note: watch.disconnected() consumes the watch, so once it completes (for any reason),
+        // we transition away from Client state
+        let disconnect_future = async {
+            if let Some(watch) = liveliness_watch {
+                watch.disconnected().await
+            } else {
+                // No watch means we shouldn't be in client state, but handle it gracefully
+                std::future::pending().await
+            }
+        };
+        let mut disconnect_future = Box::pin(disconnect_future);
+
+        // Process commands until timeout, shutdown, or host disconnection
         loop {
             tokio::select! {
                 // Timeout elapsed
                 () = &mut sleep => {
+                    // Restore client state and return (no disconnection, still connected)
+                    self.state = NodeStateInternal::Client {
+                        host_id,
+                        liveliness_watch: None, // We consumed the watch, so set to None
+                    };
                     return Ok(Some(NodeStatus {
                         state: NodeState::from(&self.state),
                         game_state: None,
                     }));
+                }
+                // Host liveliness lost - disconnect and return to searching
+                disconnect_result = &mut disconnect_future => {
+                    match disconnect_result {
+                        Ok(()) => {
+                            tracing::info!("Node '{}' detected host disconnection, returning to search", self.id);
+                            // Transition back to SearchingHost
+                            self.state = NodeStateInternal::SearchingHost;
+                            return Ok(Some(NodeStatus {
+                                state: NodeState::from(&self.state),
+                                game_state: None,
+                            }));
+                        }
+                        Err(e) => {
+                            tracing::warn!("Node '{}' liveliness error: {}", self.id, e);
+                            // Treat error as disconnect
+                            self.state = NodeStateInternal::SearchingHost;
+                            return Ok(Some(NodeStatus {
+                                state: NodeState::from(&self.state),
+                                game_state: None,
+                            }));
+                        }
+                    }
                 }
                 // Command received
                 result = self.command_rx.recv_async() => match result {
@@ -156,15 +213,14 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                         return Ok(None);
                     }
                     Ok(NodeCommand::GameAction(_action)) => {
-                        if let NodeStateInternal::Client { host_id } = &self.state {
-                            tracing::debug!(
-                                "Node '{}' forwarding action to host '{}'",
-                                self.id,
-                                host_id
-                            );
-                            // TODO: Forward action to remote host via Zenoh pub/sub
-                            // Placeholder for Phase 4 implementation
-                        }
+                        tracing::debug!(
+                            "Node '{}' forwarding action to host '{}'",
+                            self.id,
+                            host_id
+                        );
+                        // TODO: Forward action to remote host via Zenoh pub/sub
+                        // Placeholder for Phase 4 implementation
+                        // Continue the loop to wait for timeout or disconnection
                     }
                 }
             }
@@ -309,7 +365,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 
         // Handle connection result - state transition after select!
         if let Some(host_id) = connected_host {
-            self.state.client(host_id);
+            self.state.client(&self.session, &self.config.keyexpr_prefix, host_id).await?;
             Ok(Some(NodeStatus {
                 state: NodeState::from(&self.state),
                 game_state: None,

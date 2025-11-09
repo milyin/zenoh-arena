@@ -2,7 +2,8 @@
 use std::time::Instant;
 
 use crate::error::{ArenaError, Result};
-use crate::network::{NodeLivelinessToken, NodeQueryable};
+use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, NodeQueryable};
+use zenoh::key_expr::KeyExpr;
 
 /// Unique node identifier
 ///
@@ -163,6 +164,9 @@ where
     Client {
         /// ID of the host we're connected to
         host_id: NodeId,
+        /// Watches for host liveliness to detect disconnection
+        #[allow(dead_code)]
+        liveliness_watch: Option<NodeLivelinessWatch>,
     },
 
     /// Acting as host
@@ -327,8 +331,24 @@ where
 
     /// Transition from SearchingHost to Client state
     #[allow(dead_code)]
-    pub fn client(&mut self, host_id: NodeId) {
-        *self = NodeStateInternal::Client { host_id };
+    pub async fn client(
+        &mut self,
+        session: &zenoh::Session,
+        prefix: &KeyExpr<'_>,
+        host_id: NodeId,
+    ) -> Result<()> {
+        use crate::network::NodeLivelinessWatch;
+        
+        // Subscribe to liveliness events for the host
+        let liveliness_watch = NodeLivelinessWatch::subscribe(session, prefix, host_id.clone())
+            .await?;
+
+        *self = NodeStateInternal::Client {
+            host_id,
+            liveliness_watch: Some(liveliness_watch),
+        };
+        
+        Ok(())
     }
 }
 
@@ -339,7 +359,7 @@ where
     fn from(internal: &NodeStateInternal<E>) -> Self {
         match internal {
             NodeStateInternal::SearchingHost => NodeState::SearchingHost,
-            NodeStateInternal::Client { host_id } => NodeState::Client {
+            NodeStateInternal::Client { host_id, .. } => NodeState::Client {
                 host_id: host_id.clone(),
             },
             NodeStateInternal::Host {
