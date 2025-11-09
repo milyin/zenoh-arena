@@ -26,7 +26,7 @@ use crate::types::NodeId;
 use crate::error::Result;
 use crate::network::keyexpr::HostClientKeyexpr;
 use zenoh::key_expr::KeyExpr;
-use zenoh::query::{Queryable, Query};
+use zenoh::query::{Query, Queryable};
 
 /// Request from a client for host to accept connection
 ///
@@ -84,123 +84,96 @@ impl NodeRequest {
     }
 }
 
-/// Wrapper around Zenoh's Queryable for host discovery and connection
+/// Wrapper for host discovery and connection requests
 ///
-/// Declares a queryable on `<prefix>/host/<host_id>/*` to respond to:
+/// Holds a queryable declared on `<prefix>/host/<host_id>/*` to respond to:
 /// - Discovery queries: `<prefix>/host/*/<client_id>` (glob on host_id)
-///   → Callback replies immediately with ok (presence confirmation)
+///   → Replies immediately with ok (presence confirmation)
 /// - Connection queries: `<prefix>/host/<host_id>/<client_id>` (specific both)
-///   → Callback pushes NodeRequest to channel for host to accept/reject
-///
-/// The callback uses a channel to distinguish request types and forward connection
-/// requests to the host handler while immediately responding to discovery queries.
+///   → Returns NodeRequest for host to accept/reject
 #[derive(Debug)]
 pub struct NodeQueryable {
-    queryable: Queryable<flume::Receiver<Query>>,
+    /// The zenoh queryable that receives queries
+    queryable: Queryable<zenoh::handlers::FifoChannelHandler<Query>>,
+    /// Node ID for formatting replies
     node_id: NodeId,
-    /// Channel sender for connection requests (not discovery)
-    request_tx: flume::Sender<NodeRequest>,
-    /// Channel receiver for connection requests
-    request_rx: flume::Receiver<NodeRequest>,
+    /// Prefix for formatting replies
+    prefix: String,
 }
 
 impl NodeQueryable {
     /// Declare a new queryable for a host node
     ///
-    /// Declares queryable on `<prefix>/host/<host_id>/*` pattern with a callback that:
-    /// 1. Checks incoming query keyexpr
-    /// 2. For discovery queries (glob client_id): replies ok immediately
-    /// 3. For connection queries (specific client_id): pushes NodeRequest to channel
+    /// Declares queryable on `<prefix>/host/<host_id>/*` pattern.
     pub async fn declare(
         session: &zenoh::Session,
         prefix: &KeyExpr<'_>,
         node_id: NodeId,
     ) -> Result<Self> {
-        // Create channel for connection requests (not discovery)
-        let (request_tx, request_rx) = flume::bounded(32);
-        
-        // Create channel for raw queries from Zenoh
-        let (query_tx, query_rx) = flume::bounded(32);
-
         // Declare on pattern: <prefix>/host/<host_id>/*
         let host_client_keyexpr = HostClientKeyexpr::new(prefix, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = host_client_keyexpr.into();
-        let prefix_str = prefix.to_string();
         
-        // Declare queryable with channel handler to receive all queries
+        // Declare queryable without callback
         let queryable = session
             .declare_queryable(&keyexpr)
-            .with((query_tx, query_rx.clone()))
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
-
-        // Start a background task to process queries and separate discovery from connection
-        let request_tx_clone = request_tx.clone();
-        let node_id_clone = node_id.clone();
-        
-        tokio::spawn(async move {
-            while let Ok(query) = query_rx.recv_async().await {
-                // Parse the incoming query keyexpr to determine if it's discovery or connection
-                let query_keyexpr = query.key_expr().clone();
-                
-                // Try to parse as HostClientKeyexpr to extract client_id
-                match HostClientKeyexpr::try_from(query_keyexpr.clone()) {
-                    Ok(parsed_keyexpr) => {
-                        match parsed_keyexpr.client_id() {
-                            Some(_client_id) => {
-                                // Connection request (specific client_id): push to channel
-                                // Host will call accept() or reject()
-                                let request = NodeRequest::new(query);
-                                let _ = request_tx_clone.try_send(request);
-                            }
-                            None => {
-                                // Discovery request (glob client_id): reply ok immediately
-                                // This just confirms host presence for discovery phase
-                                let reply_keyexpr = format!("{}/host/{}/", 
-                                    prefix_str, node_id_clone.as_str());
-                                // Send reply asynchronously
-                                if let Err(e) = query.reply(reply_keyexpr, "").await {
-                                    tracing::debug!("Failed to reply to discovery query: {}", e);
-                                }
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        // Failed to parse keyexpr, ignore
-                        tracing::debug!(
-                            "Failed to parse query keyexpr: {}",
-                            query_keyexpr.as_str()
-                        );
-                    }
-                }
-            }
-        });
 
         Ok(Self {
             queryable,
             node_id,
-            request_tx,
-            request_rx,
+            prefix: prefix.to_string(),
         })
     }
 
     /// Wait for and retrieve the next connection request
     ///
-    /// Returns a NodeRequest that the host handler should accept() or reject().
-    /// This method blocks until a connection request arrives.
+    /// Loops receiving queries from the queryable. For each query:
+    /// - If it's a discovery query (glob client_id): replies with ok
+    /// - If it's a connection query (specific client_id): returns NodeRequest
     pub async fn expect_connection(&self) -> Result<NodeRequest> {
-        self.request_rx
-            .recv_async()
-            .await
-            .map_err(|_| crate::error::ArenaError::Internal(
-                "Connection request channel closed".to_string(),
-            ))
-    }
-
-    /// Try to retrieve a connection request without blocking
-    ///
-    /// Returns Some(NodeRequest) if available, None if channel is empty.
-    pub fn try_expect_connection(&self) -> Option<NodeRequest> {
-        self.request_rx.try_recv().ok()
+        loop {
+            // Receive next query from queryable
+            let query = self.queryable
+                .recv_async()
+                .await
+                .map_err(|_| crate::error::ArenaError::Internal(
+                    "Queryable channel closed".to_string(),
+                ))?;
+            
+            // Parse the incoming query keyexpr to determine if it's discovery or connection
+            let query_keyexpr = query.key_expr().clone();
+            
+            // Try to parse as HostClientKeyexpr to extract client_id
+            match HostClientKeyexpr::try_from(query_keyexpr.clone()) {
+                Ok(parsed_keyexpr) => {
+                    match parsed_keyexpr.client_id() {
+                        Some(_client_id) => {
+                            // Connection request (specific client_id): return it
+                            return Ok(NodeRequest::new(query));
+                        }
+                        None => {
+                            // Discovery request (glob client_id): reply ok immediately
+                            // This just confirms host presence for discovery phase
+                            let reply_keyexpr = format!("{}/host/{}/", 
+                                self.prefix, self.node_id.as_str());
+                            
+                            if let Err(e) = query.reply(reply_keyexpr, "").await {
+                                tracing::debug!("Failed to reply to discovery query: {}", e);
+                            }
+                            // Continue loop to wait for connection request
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Failed to parse keyexpr, ignore and continue
+                    tracing::debug!(
+                        "Failed to parse query keyexpr: {}",
+                        query_keyexpr.as_str()
+                    );
+                }
+            }
+        }
     }
 }
