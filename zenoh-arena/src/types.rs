@@ -4,11 +4,7 @@ use std::time::Instant;
 
 use crate::error::{ArenaError, Result};
 use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, Role};
-use futures::future::select_all;
 use futures::future::BoxFuture;
-use futures::future::FutureExt;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::task::JoinHandle;
 use zenoh::key_expr::KeyExpr;
 
 /// Unique node identifier
@@ -158,7 +154,7 @@ impl<S: std::fmt::Display> std::fmt::Display for NodeStatus<S> {
 }
 
 /// Current state of a Node (internal)
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) enum NodeStateInternal<E>
 where
     E: crate::node::GameEngine,
@@ -192,14 +188,31 @@ where
         /// Queryable for host discovery
         #[allow(dead_code)]
         queryable: Option<Arc<HostQueryable>>,
-        /// Sender used to register new client disconnect monitors
-        client_disconnect_sender: UnboundedSender<ClientDisconnectFuture>,
-        /// Receiver yielding client disconnect events
-        client_disconnect_events: UnboundedReceiver<(NodeId, Result<()>)>,
-        /// Background task handling client disconnect monitoring
-        #[allow(dead_code)]
-        client_disconnect_task: JoinHandle<()>,
+        /// Pending client disconnect monitor futures being raced with select_all
+        pending_client_disconnects: Vec<ClientDisconnectFuture>,
     },
+}
+
+impl<E> std::fmt::Debug for NodeStateInternal<E>
+where
+    E: crate::node::GameEngine,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeStateInternal::SearchingHost => f.debug_tuple("SearchingHost").finish(),
+            NodeStateInternal::Client { host_id, .. } => {
+                f.debug_struct("Client").field("host_id", host_id).finish()
+            }
+            NodeStateInternal::Host {
+                connected_clients,
+                ..
+            } => f
+                .debug_struct("Host")
+                .field("connected_clients", connected_clients)
+                .field("pending_client_disconnects_count", &"<futures>")
+                .finish(),
+        }
+    }
 }
 
 impl<E> NodeStateInternal<E>
@@ -289,17 +302,12 @@ where
         // Declare queryable for host discovery
         let queryable = HostQueryable::declare(session, prefix.clone(), node_id.clone()).await?;
 
-        let (client_disconnect_sender, client_disconnect_events, client_disconnect_task) =
-            start_client_disconnect_monitor();
-
         *self = NodeStateInternal::Host {
             connected_clients: Vec::new(),
             engine,
             liveliness_token: Some(token),
             queryable: Some(Arc::new(queryable)),
-            client_disconnect_sender,
-            client_disconnect_events,
-            client_disconnect_task,
+            pending_client_disconnects: Vec::new(),
         };
 
         Ok(())
@@ -372,59 +380,6 @@ where
             }
         }
     }
-}
-
-fn start_client_disconnect_monitor() -> (
-    UnboundedSender<ClientDisconnectFuture>,
-    UnboundedReceiver<(NodeId, Result<()>)>,
-    JoinHandle<()>,
-) {
-    let (watch_tx, mut watch_rx) = mpsc::unbounded_channel::<ClientDisconnectFuture>();
-    let (event_tx, event_rx) = mpsc::unbounded_channel::<(NodeId, Result<()>)>();
-
-    let task = tokio::spawn(async move {
-        let mut pending: Vec<ClientDisconnectFuture> = Vec::new();
-
-        loop {
-            // Drain all new futures from the channel
-            while let Ok(fut) = watch_rx.try_recv() {
-                pending.push(fut);
-            }
-
-            if pending.is_empty() {
-                // Wait for at least one future
-                if let Some(fut) = watch_rx.recv().await {
-                    pending.push(fut);
-                } else {
-                    break;
-                }
-            }
-
-            // Wait for any pending future or a new one from the channel
-            let select_all_fut = select_all(std::mem::take(&mut pending)).fuse();
-            let watch_recv = Box::pin(watch_rx.recv()).fuse();
-            
-            futures::pin_mut!(select_all_fut, watch_recv);
-            
-            futures::select! {
-                (result, _idx, remaining) = select_all_fut => {
-                    pending = remaining;
-                    if event_tx.send(result).is_err() {
-                        break;
-                    }
-                }
-                opt_fut = watch_recv => {
-                    if let Some(fut) = opt_fut {
-                        pending.push(fut);
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-
-    (watch_tx, event_rx, task)
 }
 
 #[cfg(test)]

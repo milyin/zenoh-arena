@@ -6,7 +6,6 @@ use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch};
 use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
 use futures::FutureExt;
 use std::sync::Arc;
-use tokio::sync::mpsc::error::TryRecvError;
 
 /// Commands that can be sent to the node
 #[derive(Debug, Clone)]
@@ -246,18 +245,21 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// - The step timeout elapses
     /// - A Stop command is received (returns None)
     async fn process_host(&mut self) -> Result<Option<NodeStatus<E::State>>> {
+        use futures::future::select_all;
+
         let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
 
         // Process commands until timeout or new state
         loop {
-            // Process any pending client disconnect events before waiting
-            self.drain_client_disconnect_events().await?;
-
-            // Snapshot queryable for this iteration
-            let queryable_arc = match &self.state {
-                NodeStateInternal::Host { queryable, .. } => queryable.clone(),
+            // Snapshot queryable and pending futures for this iteration
+            let (queryable_arc, has_pending) = match &self.state {
+                NodeStateInternal::Host {
+                    queryable,
+                    pending_client_disconnects,
+                    ..
+                } => (queryable.clone(), !pending_client_disconnects.is_empty()),
                 _ => {
                     return Ok(Some(NodeStatus {
                         state: NodeState::from(&self.state),
@@ -281,8 +283,39 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 }, if queryable_arc.is_some() => {
                     if let Ok(request) = request_result {
                         self.handle_connection_request(request).await?;
-                        self.drain_client_disconnect_events().await?;
                     }
+                }
+                // Client disconnect detected - race over pending futures using select_all
+                (client_id, disconnect_result) = async {
+                    let pending = match &mut self.state {
+                        NodeStateInternal::Host {
+                            pending_client_disconnects,
+                            ..
+                        } => std::mem::take(pending_client_disconnects),
+                        _ => Vec::new(),
+                    };
+
+                    if pending.is_empty() {
+                        // No pending futures - return a never-completing future
+                        futures::future::pending().await
+                    } else {
+                        let select_all_fut = select_all(pending).fuse();
+                        futures::pin_mut!(select_all_fut);
+                        let (result, _idx, remaining) = select_all_fut.await;
+                        
+                        // Restore remaining futures to state
+                        if let NodeStateInternal::Host {
+                            pending_client_disconnects,
+                            ..
+                        } = &mut self.state
+                        {
+                            *pending_client_disconnects = remaining;
+                        }
+                        
+                        result
+                    }
+                }, if has_pending => {
+                    self.handle_client_disconnect(client_id, disconnect_result).await?;
                 }
                 // Command received
                 result = self.command_rx.recv_async() => match result {
@@ -418,7 +451,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             engine,
             connected_clients,
             queryable,
-            client_disconnect_sender,
+            pending_client_disconnects,
             ..
         } = &mut self.state
         else {
@@ -469,14 +502,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                                 }
                                 .boxed();
 
-                            if let Err(e) = client_disconnect_sender.send(future) {
-                                tracing::warn!(
-                                    "Node '{}' could not register disconnect monitor for '{}': {}",
-                                    self.id,
-                                    client_id,
-                                    e
-                                );
-                            }
+                            pending_client_disconnects.push(future);
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -521,30 +547,6 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 }
 
 impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
-    async fn drain_client_disconnect_events(&mut self) -> Result<()> {
-        loop {
-            let event = match &mut self.state {
-                NodeStateInternal::Host {
-                    client_disconnect_events,
-                    ..
-                } => match client_disconnect_events.try_recv() {
-                    Ok(event) => Some(event),
-                    Err(TryRecvError::Empty) => None,
-                    Err(TryRecvError::Disconnected) => None,
-                },
-                _ => None,
-            };
-
-            let Some((client_id, result)) = event else {
-                break;
-            };
-
-            self.handle_client_disconnect(client_id, result).await?;
-        }
-
-        Ok(())
-    }
-
     async fn handle_client_disconnect(
         &mut self,
         client_id: NodeId,
