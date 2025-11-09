@@ -27,7 +27,7 @@
 
 use crate::types::NodeId;
 use crate::error::Result;
-use crate::network::keyexpr::{HostLookupKeyexpr, HostClientKeyexpr};
+use crate::network::keyexpr::{HostLookupKeyexpr, HostClientKeyexpr, HostKeyexpr};
 use zenoh::key_expr::KeyExpr;
 
 /// Helper for connecting to available hosts
@@ -61,19 +61,27 @@ impl NodeQuerier {
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
-        let host_ids: Vec<NodeId> = Vec::new();
+        let mut host_ids: Vec<NodeId> = Vec::new();
 
         // Collect all host IDs from discovery responses
-        loop {
-            match discovery_replies.recv_async().await {
-                Ok(_reply) => {
-                    // For now, just collect successful replies
-                    // TODO: Parse the reply to extract host_id from key expression
-                    tracing::debug!("Received discovery response");
+        while let Ok(reply) = discovery_replies.recv_async().await {
+            // Parse the reply to extract host_id from key expression
+            match reply.result() {
+                Ok(sample) => {
+                    let keyexpr = sample.key_expr().clone();
+                    match HostKeyexpr::try_from(keyexpr.clone()) {
+                        Ok(host_keyexpr) => {
+                            let host_id = host_keyexpr.host_id().clone();
+                            tracing::debug!("Discovered host: {}", host_id);
+                            host_ids.push(host_id);
+                        }
+                        Err(e) => {
+                            tracing::debug!("Failed to parse host_id from keyexpr {}: {}", keyexpr.as_str(), e);
+                        }
+                    }
                 }
-                Err(_) => {
-                    // No more replies
-                    break;
+                Err(e) => {
+                    tracing::debug!("Discovery reply error: {}", e);
                 }
             }
         }
