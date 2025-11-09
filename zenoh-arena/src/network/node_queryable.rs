@@ -65,7 +65,7 @@ impl NodeRequest {
         self.query
             .reply(client_keyexpr.prefix().to_string(), "")
             .await
-            .map_err(|e| crate::error::ArenaError::Zenoh(e))?;
+            .map_err(crate::error::ArenaError::Zenoh)?;
 
         Ok(client_id)
     }
@@ -78,7 +78,7 @@ impl NodeRequest {
         self.query
             .reply_err(reason)
             .await
-            .map_err(|e| crate::error::ArenaError::Zenoh(e))?;
+            .map_err(crate::error::ArenaError::Zenoh)?;
 
         Ok(())
     }
