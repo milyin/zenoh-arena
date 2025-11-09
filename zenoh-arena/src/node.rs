@@ -113,13 +113,13 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             ));
         }
 
-        // Special handling for SearchingHost state
-        if matches!(self.state, NodeStateInternal::SearchingHost) {
-            return self.search_for_host().await;
+        // Dispatch based on current state
+        match self.state {
+            NodeStateInternal::SearchingHost => self.search_for_host().await,
+            NodeStateInternal::Client { .. } | NodeStateInternal::Host { .. } => {
+                self.process_actions().await
+            }
         }
-
-        // Process actions for Client or Host state
-        self.process_actions().await
     }
 
     /// Process actions when in Client or Host state
