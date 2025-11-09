@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use crate::error::{ArenaError, Result};
 use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, Role};
-use futures::future::BoxFuture;
 use zenoh::key_expr::KeyExpr;
 
 /// Unique node identifier
@@ -86,9 +85,6 @@ pub struct NodeInfo {
     /// Time when node was created or connected
     pub connected_since: Instant,
 }
-
-/// Future type used to monitor client liveliness disconnect events
-type ClientDisconnectFuture = BoxFuture<'static, (NodeId, Result<NodeId>)>;
 
 /// Public node state returned by step() method
 #[derive(Debug, Clone)]
@@ -188,8 +184,8 @@ where
         /// Queryable for host discovery
         #[allow(dead_code)]
         queryable: Option<Arc<HostQueryable>>,
-        /// Pending client disconnect monitor futures being raced with select_all
-        pending_client_disconnects: Vec<ClientDisconnectFuture>,
+        /// Multinode liveliness watch to detect any client disconnect
+        client_liveliness_watch: NodeLivelinessWatch,
     },
 }
 
@@ -302,12 +298,15 @@ where
         // Declare queryable for host discovery
         let queryable = HostQueryable::declare(session, prefix.clone(), node_id.clone()).await?;
 
+        // Create multinode liveliness watch for monitoring connected clients
+        let client_liveliness_watch = NodeLivelinessWatch::new(node_id.clone());
+
         *self = NodeStateInternal::Host {
             connected_clients: Vec::new(),
             engine,
             liveliness_token: Some(token),
             queryable: Some(Arc::new(queryable)),
-            pending_client_disconnects: Vec::new(),
+            client_liveliness_watch,
         };
 
         Ok(())

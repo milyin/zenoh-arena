@@ -190,4 +190,10 @@ impl NodeLivelinessWatch {
     pub fn host_id(&self) -> &NodeId {
         &self.host_id
     }
+
+    /// Check if there are any subscribers registered
+    pub fn has_subscribers(&self) -> bool {
+        !self.subscribers.is_empty()
+    }
 }
+

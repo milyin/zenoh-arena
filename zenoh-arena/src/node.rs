@@ -2,9 +2,8 @@
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
 use crate::network::host_queryable::HostRequest;
-use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch};
+use crate::network::{HostQueryable, NodeLivelinessToken};
 use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
-use futures::FutureExt;
 use std::sync::Arc;
 
 /// Commands that can be sent to the node
@@ -240,26 +239,26 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Process actions when in Host state
     ///
     /// Handles commands from the command channel and processes game actions through the engine.
+    /// Also monitors client liveliness to detect disconnections.
     /// Returns when either:
     /// - A new game state is produced by the engine
     /// - The step timeout elapses
     /// - A Stop command is received (returns None)
+    /// - A client disconnects (handled and continues loop)
     async fn process_host(&mut self) -> Result<Option<NodeStatus<E::State>>> {
-        use futures::future::select_all;
-
         let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
 
         // Process commands until timeout or new state
         loop {
-            // Snapshot queryable and pending futures for this iteration
-            let (queryable_arc, has_pending) = match &self.state {
+            // Snapshot queryable and whether we have clients to monitor
+            let (queryable_arc, has_clients) = match &self.state {
                 NodeStateInternal::Host {
                     queryable,
-                    pending_client_disconnects,
+                    client_liveliness_watch,
                     ..
-                } => (queryable.clone(), !pending_client_disconnects.is_empty()),
+                } => (queryable.clone(), client_liveliness_watch.has_subscribers()),
                 _ => {
                     return Ok(Some(NodeStatus {
                         state: NodeState::from(&self.state),
@@ -285,37 +284,21 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                         self.handle_connection_request(request).await?;
                     }
                 }
-                // Client disconnect detected - race over pending futures using select_all
-                (client_id, disconnect_result) = async {
-                    let pending = match &mut self.state {
-                        NodeStateInternal::Host {
-                            pending_client_disconnects,
-                            ..
-                        } => std::mem::take(pending_client_disconnects),
-                        _ => Vec::new(),
-                    };
-
-                    if pending.is_empty() {
-                        // No pending futures - return a never-completing future
-                        futures::future::pending().await
+                // Client disconnect detected via liveliness watch
+                disconnect_result = async {
+                    if let NodeStateInternal::Host {
+                        client_liveliness_watch,
+                        ..
+                    } = &mut self.state
+                    {
+                        client_liveliness_watch.disconnected().await
                     } else {
-                        let select_all_fut = select_all(pending).fuse();
-                        futures::pin_mut!(select_all_fut);
-                        let (result, _idx, remaining) = select_all_fut.await;
-                        
-                        // Restore remaining futures to state
-                        if let NodeStateInternal::Host {
-                            pending_client_disconnects,
-                            ..
-                        } = &mut self.state
-                        {
-                            *pending_client_disconnects = remaining;
-                        }
-                        
-                        result
+                        futures::future::pending().await
                     }
-                }, if has_pending => {
-                    self.handle_client_disconnect(client_id, disconnect_result).await?;
+                }, if has_clients => {
+                    if let Ok(disconnected_id) = disconnect_result {
+                        self.handle_client_disconnect(disconnected_id).await?;
+                    }
                 }
                 // Command received
                 result = self.command_rx.recv_async() => match result {
@@ -451,7 +434,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             engine,
             connected_clients,
             queryable,
-            pending_client_disconnects,
+            client_liveliness_watch,
             ..
         } = &mut self.state
         else {
@@ -482,32 +465,26 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     // Track accepted client
                     connected_clients.push(client_id.clone());
 
-                    // Register liveliness watch for the client so we can detect disconnects
-                    let client_id_for_watch = client_id.clone();
-
-                    let mut watch = NodeLivelinessWatch::new(client_id_for_watch.clone());
-                    match watch
+                    // Subscribe to liveliness events for the client so we can detect disconnects
+                    match client_liveliness_watch
                         .subscribe(
                             &self.session,
                             self.config.keyexpr_prefix.clone(),
                             crate::network::Role::Client,
-                            &client_id_for_watch,
+                            &client_id,
                         )
                         .await
                     {
                         Ok(()) => {
-                            let future: futures::future::BoxFuture<'static, (NodeId, Result<NodeId>)> =
-                                async move {
-                                    let result = watch.disconnected().await;
-                                    (client_id_for_watch, result)
-                                }
-                                .boxed();
-
-                            pending_client_disconnects.push(future);
+                            tracing::debug!(
+                                "Node '{}' subscribed to liveliness for client '{}'",
+                                self.id,
+                                client_id
+                            );
                         }
                         Err(e) => {
                             tracing::warn!(
-                                "Node '{}' failed to create liveliness watch for client '{}': {}",
+                                "Node '{}' failed to subscribe to liveliness for client '{}': {}",
                                 self.id,
                                 client_id,
                                 e
@@ -550,8 +527,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     async fn handle_client_disconnect(
         &mut self,
-        client_id: NodeId,
-        disconnect_result: Result<NodeId>,
+        disconnected_id: NodeId,
     ) -> Result<()> {
         let NodeStateInternal::Host {
             connected_clients,
@@ -563,22 +539,13 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             return Ok(());
         };
 
-        match disconnect_result {
-            Ok(disconnected_id) => tracing::info!(
-                "Node '{}' detected client '{}' disconnect (liveliness watch returned: {})",
-                self.id,
-                client_id,
-                disconnected_id
-            ),
-            Err(e) => tracing::warn!(
-                "Node '{}' client '{}' liveliness error: {}",
-                self.id,
-                client_id,
-                e
-            ),
-        }
+        tracing::info!(
+            "Node '{}' detected client '{}' disconnect",
+            self.id,
+            disconnected_id
+        );
 
-        let removed = if let Some(pos) = connected_clients.iter().position(|id| id == &client_id) {
+        let removed = if let Some(pos) = connected_clients.iter().position(|id| id == &disconnected_id) {
             connected_clients.remove(pos);
             true
         } else {
@@ -589,7 +556,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             tracing::debug!(
                 "Node '{}' received disconnect for unknown client '{}'",
                 self.id,
-                client_id
+                disconnected_id
             );
         }
 
