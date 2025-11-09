@@ -25,3 +25,26 @@ pub fn query_nodes_keyexpr(prefix: &KeyExpr) -> KeyExpr<'static> {
     // Safe to unwrap because prefix is a valid keyexpr
     KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
 }
+
+/// Build a host discovery keyexpr for requesting host info
+///
+/// Pattern: `<prefix>/host/*`
+///
+/// Used to discover available hosts in the arena.
+pub fn discover_hosts_keyexpr(prefix: &KeyExpr) -> KeyExpr<'static> {
+    let keyexpr_str = format!("{}/host/*", prefix);
+    // Safe to unwrap because prefix is a valid keyexpr
+    KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
+}
+
+/// Build a host connection keyexpr for connecting to a specific host
+///
+/// Pattern: `<prefix>/host/<host_id>`
+///
+/// Used to attempt connection to a specific host.
+pub fn host_connect_keyexpr(prefix: &KeyExpr, host_id: &NodeId) -> KeyExpr<'static> {
+    let keyexpr_str = format!("{}/host/{}", prefix, host_id.as_str());
+    // Safe to unwrap because both inputs are valid keyexprs
+    KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
+}
+
