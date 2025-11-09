@@ -190,11 +190,11 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                         game_state: None,
                     }));
                 }
-                // Query received from a client
-                query_result = self.receive_query() => {
-                    if let Some(_query) = query_result {
-                        tracing::debug!("Node '{}' received query from client", self.id);
-                        // TODO: Process query and send response with host info
+                // Query received from a client (connection request)
+                request_result = self.expect_connection() => {
+                    if let Some(_request) = request_result {
+                        tracing::debug!("Node '{}' received connection request from client", self.id);
+                        // TODO: Process request and send response with host info
                     }
                 }
                 // Command received
@@ -227,12 +227,12 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         }
     }
 
-    /// Receive a query from the host's queryable
+    /// Accept a connection request from a client
     ///
-    /// Returns Some(query) if a query was received, None if no query is available
-    async fn receive_query(&self) -> Option<zenoh::query::Query> {
+    /// Returns a NodeRequest if a client is connecting, or None if not in Host state.
+    async fn expect_connection(&self) -> Option<crate::network::NodeRequest> {
         if let NodeStateInternal::Host { queryable: Some(q), .. } = &self.state {
-            return q.recv_query().await.ok();
+            return q.expect_connection().await.ok();
         }
         None
     }

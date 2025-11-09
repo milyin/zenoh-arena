@@ -186,16 +186,4 @@ impl NodeQueryable {
             }
         }
     }
-
-    /// Receive a raw query without filtering
-    ///
-    /// Used for testing or when direct query access is needed.
-    pub async fn recv_query(&self) -> Result<Query> {
-        self.queryable
-            .recv_async()
-            .await
-            .map_err(|_| crate::error::ArenaError::Internal(
-                "Queryable channel closed".to_string(),
-            ))
-    }
 }

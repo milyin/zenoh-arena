@@ -9,4 +9,4 @@ pub mod node_queryable;
 pub use keyexpr::{HostKeyexpr, HostClientKeyexpr};
 pub use node_liveliness::NodeLivelinessToken;
 pub use node_querier::NodeQuerier;
-pub use node_queryable::NodeQueryable;
+pub use node_queryable::{NodeQueryable, NodeRequest};
