@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::types::NodeId;
-use crate::network::keyexpr::HostKeyexpr;
+use crate::network::keyexpr::{NodeKeyexpr, Role};
 use zenoh::key_expr::KeyExpr;
 use zenoh::liveliness::LivelinessToken;
 use zenoh::sample::SampleKind;
@@ -25,7 +25,7 @@ impl HostLivelinessToken {
         prefix: impl Into<KeyExpr<'static>>,
         node_id: NodeId,
     ) -> Result<Self> {
-        let host_keyexpr = HostKeyexpr::new(prefix, Some(node_id.clone()));
+        let host_keyexpr = NodeKeyexpr::new(prefix, Role::Host, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = host_keyexpr.into();
         let token = session
             .liveliness()
@@ -68,7 +68,7 @@ impl HostLivelinessWatch {
         prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
     ) -> Result<Self> {
-        let host_keyexpr = HostKeyexpr::new(prefix, Some(host_id.clone()));
+        let host_keyexpr = NodeKeyexpr::new(prefix, Role::Host, Some(host_id.clone()), None);
         let keyexpr: KeyExpr = host_keyexpr.into();
         
         let subscriber = session

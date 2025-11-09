@@ -227,55 +227,6 @@ impl From<NodeKeyexpr> for KeyExpr<'static> {
     }
 }
 
-/// Host keyexpr - wrapper for NodeKeyexpr with Host role
-///
-/// Pattern: `<prefix>/host/<host_id>` (when host_id is Some)
-/// Pattern: `<prefix>/host/*` (when host_id is None)
-///
-/// Used for:
-/// - Declaring queryables to respond to connection requests
-/// - Connecting to a specific host
-/// - Discovering all available hosts (when host_id is None)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HostKeyexpr(NodeKeyexpr);
-
-impl HostKeyexpr {
-    /// Create a new HostKeyexpr
-    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, host_id: Option<NodeId>) -> Self {
-        Self(NodeKeyexpr::new(prefix, Role::Host, host_id, None))
-    }
-
-    /// Get the host ID (None means wildcard)
-    pub fn host_id(&self) -> &Option<NodeId> {
-        self.0.own_id()
-    }
-
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.0.prefix()
-    }
-}
-
-impl TryFrom<KeyExpr<'_>> for HostKeyexpr {
-    type Error = ArenaError;
-
-    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-        let node_keyexpr = NodeKeyexpr::try_from(keyexpr)?;
-        if node_keyexpr.role() != Role::Host {
-            return Err(ArenaError::InvalidKeyexpr(
-                "Expected Host role in keyexpr".to_string(),
-            ));
-        }
-        Ok(Self(node_keyexpr))
-    }
-}
-
-impl From<HostKeyexpr> for KeyExpr<'static> {
-    fn from(host_keyexpr: HostKeyexpr) -> Self {
-        KeyExpr::from(host_keyexpr.0)
-    }
-}
-
 /// Node keyexpr - wrapper for NodeKeyexpr with Node role
 ///
 /// Pattern: `<prefix>/node/<node_id>` (when node_id is Some)
@@ -388,54 +339,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_host_keyexpr_creation() {
-        let prefix = KeyExpr::try_from("arena/game1").unwrap().into_owned();
-        let host_id = NodeId::from_name("host1".to_string()).unwrap();
-
-        let host_keyexpr = HostKeyexpr::new(prefix, Some(host_id.clone()));
-        assert_eq!(host_keyexpr.host_id(), &Some(host_id));
-        assert_eq!(host_keyexpr.prefix().as_str(), "arena/game1");
-    }
-
-    #[test]
-    fn test_host_keyexpr_roundtrip() {
-        let prefix = KeyExpr::try_from("arena/game1").unwrap().into_owned();
-        let host_id = NodeId::from_name("host1".to_string()).unwrap();
-
-        let host_keyexpr = HostKeyexpr::new(prefix, Some(host_id.clone()));
-        let keyexpr: KeyExpr = host_keyexpr.into();
-
-        assert_eq!(keyexpr.as_str(), "arena/game1/host/host1");
-
-        let parsed = HostKeyexpr::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.host_id(), &Some(host_id));
-        assert_eq!(parsed.prefix().as_str(), "arena/game1");
-    }
-
-    #[test]
-    fn test_host_keyexpr_wildcard_creation() {
-        let prefix = KeyExpr::try_from("arena/game1").unwrap().into_owned();
-
-        let host_keyexpr = HostKeyexpr::new(prefix, None);
-        assert_eq!(host_keyexpr.host_id(), &None);
-        assert_eq!(host_keyexpr.prefix().as_str(), "arena/game1");
-    }
-
-    #[test]
-    fn test_host_keyexpr_wildcard_roundtrip() {
-        let prefix = KeyExpr::try_from("arena/game1").unwrap().into_owned();
-
-        let host_keyexpr = HostKeyexpr::new(prefix, None);
-        let keyexpr: KeyExpr = host_keyexpr.into();
-
-        assert_eq!(keyexpr.as_str(), "arena/game1/host/*");
-
-        let parsed = HostKeyexpr::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.host_id(), &None);
-        assert_eq!(parsed.prefix().as_str(), "arena/game1");
-    }
-
-    #[test]
     fn test_host_client_keyexpr_creation() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
         let host_id = NodeId::from_name("host1".to_string()).unwrap();
@@ -543,13 +446,6 @@ mod tests {
         assert_eq!(parsed.host_id(), &None);
         assert_eq!(parsed.client_id(), &None);
         assert_eq!(parsed.prefix(), "arena/game1");
-    }
-
-    #[test]
-    fn test_host_keyexpr_invalid_pattern() {
-        let keyexpr = KeyExpr::try_from("arena/game1/invalid/host1").unwrap();
-        let result = HostKeyexpr::try_from(keyexpr);
-        assert!(result.is_err());
     }
 
     #[test]
