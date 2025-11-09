@@ -223,27 +223,27 @@ where
     ///
     /// Drops the current state (including engine and liveliness token if in Host mode)
     #[allow(dead_code)]
-    pub fn searching(self) -> Self {
-        NodeStateInternal::SearchingHost
+    pub fn searching(&mut self) {
+        *self = NodeStateInternal::SearchingHost;
     }
 
     /// Transition from SearchingHost to Host state
     ///
     /// Creates liveliness token and calls update_host to set is_accepting
     pub async fn host(
-        self,
+        &mut self,
         engine: E,
         session: &zenoh::Session,
         prefix: &zenoh::key_expr::KeyExpr<'_>,
         node_id: &NodeId,
-    ) -> Result<Self>
+    ) -> Result<()>
     where
         E: crate::node::GameEngine,
     {
         // Create liveliness token
         let token = NodeLivelinessToken::declare(session, prefix, node_id.clone()).await?;
 
-        let mut new_state = NodeStateInternal::Host {
+        *self = NodeStateInternal::Host {
             is_accepting: false, // Will be updated by update_host
             connected_clients: Vec::new(),
             engine,
@@ -251,9 +251,9 @@ where
         };
 
         // Update is_accepting based on max_clients
-        new_state.update_host();
+        self.update_host();
 
-        Ok(new_state)
+        Ok(())
     }
 
     /// Update Host state by checking if we should accept clients
@@ -282,8 +282,8 @@ where
 
     /// Transition from SearchingHost to Client state
     #[allow(dead_code)]
-    pub fn client(self, host_id: NodeId) -> Self {
-        NodeStateInternal::Client { host_id }
+    pub fn client(&mut self, host_id: NodeId) {
+        *self = NodeStateInternal::Client { host_id };
     }
 }
 

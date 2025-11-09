@@ -20,7 +20,7 @@ struct Args {
     prefix: Option<KeyExpr<'static>>,
 
     /// Force host mode
-    #[arg(short, long, default_value = "true")]
+    #[arg(short, long)]
     force_host: bool,
 
     /// Path to Zenoh config file

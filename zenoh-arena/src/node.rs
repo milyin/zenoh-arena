@@ -58,17 +58,15 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         let (command_tx, command_rx) = flume::unbounded();
 
         // Initial state depends on force_host configuration
-        let state = if config.force_host {
+        let mut state = NodeStateInternal::default();
+        
+        if config.force_host {
             tracing::info!("Node '{}' forced to host mode", id);
             let engine = get_engine();
             
             // Use the transition function to create host state
-            NodeStateInternal::default()
-                .host(engine, &session, &config.keyexpr_prefix, &id)
-                .await?
-        } else {
-            NodeStateInternal::default()
-        };
+            state.host(engine, &session, &config.keyexpr_prefix, &id).await?;
+        }
 
         let node = Self {
             id,
