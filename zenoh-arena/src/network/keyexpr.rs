@@ -14,3 +14,14 @@ pub fn node_keyexpr(prefix: &KeyExpr, node_id: &NodeId) -> KeyExpr<'static> {
     // Safe to unwrap because both inputs are valid keyexprs
     KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
 }
+
+/// Build a query key expression for finding available hosts
+///
+/// Pattern: `<prefix>/node/*`
+///
+/// This allows querying for all nodes in the arena.
+pub fn query_nodes_keyexpr(prefix: &KeyExpr) -> KeyExpr<'static> {
+    let keyexpr_str = format!("{}/node/*", prefix);
+    // Safe to unwrap because prefix is a valid keyexpr
+    KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
+}

@@ -113,6 +113,11 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             ));
         }
 
+        // Special handling for SearchingHost state
+        if matches!(self.state, NodeStateInternal::SearchingHost) {
+            return self.search_for_host().await;
+        }
+
         let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
@@ -143,11 +148,11 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                         // Process action based on current state
                         match &mut self.state {
                             NodeStateInternal::SearchingHost => {
+                                // This should not happen due to the check above
                                 tracing::warn!(
                                     "Node '{}' received action while searching for host, ignoring",
                                     self.id
                                 );
-                                // Actions are ignored while searching for a host
                             }
                             NodeStateInternal::Client { host_id } => {
                                 tracing::debug!(
@@ -177,6 +182,92 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             }
         }
     }
+
+    /// Search for available hosts (called when in SearchingHost state)
+    ///
+    /// Uses NodeQuerier to find available hosts. If timeout expires without finding
+    /// any hosts, transitions to Host state.
+    async fn search_for_host(&mut self) -> Result<Option<NodeStatus<E::State>>> {
+        use crate::network::NodeQuerier;
+
+        tracing::info!("Node '{}' searching for hosts...", self.id);
+
+        // Declare the querier
+        let querier = NodeQuerier::declare(&self.session, &self.config.keyexpr_prefix).await?;
+        
+        let search_timeout = tokio::time::Duration::from_millis(self.config.search_timeout_ms);
+        let sleep = tokio::time::sleep(search_timeout);
+        tokio::pin!(sleep);
+
+        // Wait for responses or timeout
+        loop {
+            tokio::select! {
+                // Search timeout elapsed - no hosts found, become host
+                () = &mut sleep => {
+                    tracing::info!(
+                        "Node '{}' search timeout - no hosts found, transitioning to host mode",
+                        self.id
+                    );
+                    
+                    // Transition to host state
+                    let engine = (self.get_engine)();
+                    self.state.host(
+                        engine,
+                        &self.session,
+                        &self.config.keyexpr_prefix,
+                        &self.id
+                    ).await?;
+
+                    return Ok(Some(NodeStatus {
+                        state: NodeState::from(&self.state),
+                        game_state: None,
+                    }));
+                }
+                // Response received
+                result = querier.receiver().recv_async() => {
+                    match result {
+                        Ok(_reply) => {
+                            // Found at least one host
+                            tracing::info!("Node '{}' found available host(s)", self.id);
+                            
+                            // TODO: Parse reply to get host information and transition to Client state
+                            // For now, just log that we found something
+                            // This will be implemented in a later phase
+                            
+                            return Ok(Some(NodeStatus {
+                                state: NodeState::from(&self.state),
+                                game_state: None,
+                            }));
+                        }
+                        Err(_) => {
+                            // No more replies available, continue waiting for timeout
+                            // (receiver closed means query completed)
+                            continue;
+                        }
+                    }
+                }
+                // Check for Stop command while searching
+                result = self.command_rx.recv_async() => match result {
+                    Err(_) => {
+                        tracing::info!("Node '{}' command channel closed during search", self.id);
+                        return Ok(None);
+                    }
+                    Ok(NodeCommand::Stop) => {
+                        tracing::info!("Node '{}' received Stop command during search, exiting", self.id);
+                        return Ok(None);
+                    }
+                    Ok(NodeCommand::GameAction(_)) => {
+                        tracing::warn!(
+                            "Node '{}' received action while searching for host, ignoring",
+                            self.id
+                        );
+                        // Continue searching
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 /// Trait for game engine integration

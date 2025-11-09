@@ -86,6 +86,14 @@ impl<'a, E: GameEngine, F: Fn() -> E> NodeBuilder<'a, E, F> {
         self
     }
 
+    /// Set the search timeout in milliseconds
+    /// When in SearchingHost state, if no hosts are found within this timeout,
+    /// the node transitions to Host state
+    pub fn search_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.config.search_timeout_ms = timeout_ms;
+        self
+    }
+
     /// Set the key expression prefix
     pub fn prefix(mut self, prefix: KeyExpr<'static>) -> Self {
         self.config.keyexpr_prefix = prefix;
