@@ -118,6 +118,18 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             return self.search_for_host().await;
         }
 
+        // Process actions for Client or Host state
+        self.process_actions().await
+    }
+
+    /// Process actions when in Client or Host state
+    ///
+    /// Handles commands from the command channel and processes game actions.
+    /// Returns when either:
+    /// - A new game state is produced by the engine (Host mode)
+    /// - The step timeout elapses
+    /// - A Stop command is received (returns None)
+    async fn process_actions(&mut self) -> Result<Option<NodeStatus<E::State>>> {
         let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
@@ -148,7 +160,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                         // Process action based on current state
                         match &mut self.state {
                             NodeStateInternal::SearchingHost => {
-                                // This should not happen due to the check above
+                                // This should not happen due to the check in step()
                                 tracing::warn!(
                                     "Node '{}' received action while searching for host, ignoring",
                                     self.id
