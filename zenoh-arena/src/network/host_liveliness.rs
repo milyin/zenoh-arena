@@ -22,7 +22,7 @@ impl HostLivelinessToken {
     /// Declare a new liveliness token for a host node
     pub async fn declare(
         session: &zenoh::Session,
-        prefix: &KeyExpr<'_>,
+        prefix: impl Into<KeyExpr<'static>>,
         node_id: NodeId,
     ) -> Result<Self> {
         let host_keyexpr = HostKeyexpr::new(prefix, Some(node_id.clone()));
@@ -65,7 +65,7 @@ impl HostLivelinessWatch {
     /// The subscriber will receive events when the host's liveliness token is declared or undeclared.
     pub async fn subscribe(
         session: &zenoh::Session,
-        prefix: &KeyExpr<'_>,
+        prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
     ) -> Result<Self> {
         let host_keyexpr = HostKeyexpr::new(prefix, Some(host_id.clone()));

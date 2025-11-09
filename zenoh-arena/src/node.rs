@@ -67,7 +67,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 
             // Use the transition function to create host state
             state
-                .host(engine, &session, &config.keyexpr_prefix, &id)
+                .host(engine, &session, config.keyexpr_prefix.clone(), &id)
                 .await?;
         }
 
@@ -135,9 +135,10 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     async fn process_client(&mut self) -> Result<Option<NodeStatus<E::State>>> {
         // Extract the client state data temporarily to use the liveliness watch
         let (host_id, mut liveliness_watch) = match std::mem::take(&mut self.state) {
-            NodeStateInternal::Client { host_id, liveliness_watch } => {
-                (host_id, liveliness_watch)
-            }
+            NodeStateInternal::Client {
+                host_id,
+                liveliness_watch,
+            } => (host_id, liveliness_watch),
             other_state => {
                 // Restore state if it wasn't Client
                 self.state = other_state;
@@ -313,7 +314,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     break None;
                 }
                 // Try to connect to available hosts
-                connection_result = HostQuerier::connect(&self.session, &self.config.keyexpr_prefix, self.id.clone()) => {
+                connection_result = HostQuerier::connect(&self.session, self.config.keyexpr_prefix.clone(), self.id.clone()) => {
                     match connection_result {
                         Ok(Some(host_id)) => {
                             // Successfully connected to a host
@@ -354,7 +355,9 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 
         // Handle connection result - state transition after select!
         if let Some(host_id) = connected_host {
-            self.state.client(&self.session, &self.config.keyexpr_prefix, host_id).await?;
+            self.state
+                .client(&self.session, self.config.keyexpr_prefix.clone(), host_id)
+                .await?;
             Ok(Some(NodeStatus {
                 state: NodeState::from(&self.state),
                 game_state: None,
@@ -364,7 +367,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 .host(
                     (self.get_engine)(),
                     &self.session,
-                    &self.config.keyexpr_prefix,
+                    self.config.keyexpr_prefix.clone(),
                     &self.id,
                 )
                 .await?;

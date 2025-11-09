@@ -71,15 +71,17 @@ impl HostQuerier {
     /// - `Err(_)` - Zenoh query error
     pub async fn connect(
         session: &zenoh::Session,
-        prefix: &KeyExpr<'_>,
+        prefix: impl Into<KeyExpr<'static>>,
         client_id: NodeId,
     ) -> Result<Option<NodeId>> {
         tracing::debug!("Discovering available hosts...");
 
+        let prefix = prefix.into();
+
         // Phase 1: Discover all available hosts
         // Query: <prefix>/host/*/<client_id> (glob on host_id)
         // This queries all hosts in the arena, asking them to confirm presence
-        let discover_keyexpr = HostClientKeyexpr::new(prefix, None, Some(client_id.clone()));
+        let discover_keyexpr = HostClientKeyexpr::new(prefix.clone(), None, Some(client_id.clone()));
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
@@ -120,7 +122,7 @@ impl HostQuerier {
         // Query: <prefix>/host/<host_id>/<client_id> (specific host_id and client_id)
         // This requests the specific host to confirm it accepts this client's connection
         for host_id in host_ids {
-            let connect_keyexpr = HostClientKeyexpr::new(prefix, Some(host_id.clone()), Some(client_id.clone()));
+            let connect_keyexpr = HostClientKeyexpr::new(prefix.clone(), Some(host_id.clone()), Some(client_id.clone()));
             let connect_keyexpr: KeyExpr = connect_keyexpr.into();
             
             match session.get(connect_keyexpr).await {

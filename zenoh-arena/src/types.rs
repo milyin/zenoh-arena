@@ -255,17 +255,19 @@ where
         &mut self,
         engine: E,
         session: &zenoh::Session,
-        prefix: &zenoh::key_expr::KeyExpr<'_>,
+        prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
     ) -> Result<()>
     where
         E: crate::node::GameEngine,
     {
+        let prefix = prefix.into();
+
         // Create liveliness token
-        let token = HostLivelinessToken::declare(session, prefix, node_id.clone()).await?;
+        let token = HostLivelinessToken::declare(session, prefix.clone(), node_id.clone()).await?;
 
         // Declare queryable for host discovery
-        let queryable = HostQueryable::declare(session, prefix, node_id.clone()).await?;
+        let queryable = HostQueryable::declare(session, prefix.clone(), node_id.clone()).await?;
 
         *self = NodeStateInternal::Host {
             connected_clients: Vec::new(),
@@ -281,11 +283,10 @@ where
     ///
     /// Creates queryable if engine has capacity (current clients < max_clients)
     /// Drops queryable if capacity is reached (to prevent new clients from joining)
-    #[allow(dead_code)]
     pub async fn update_host(
         &mut self,
         session: &zenoh::Session,
-        prefix: &zenoh::key_expr::KeyExpr<'_>,
+        prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
     ) -> Result<()>
     where
@@ -333,7 +334,7 @@ where
     pub async fn client(
         &mut self,
         session: &zenoh::Session,
-        prefix: &KeyExpr<'_>,
+        prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
     ) -> Result<()> {
         use crate::network::HostLivelinessWatch;

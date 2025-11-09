@@ -127,11 +127,12 @@ impl HostQueryable {
     /// Declares queryable on `<prefix>/host/<host_id>/*` pattern.
     pub async fn declare(
         session: &zenoh::Session,
-        prefix: &KeyExpr<'_>,
+        prefix: impl Into<KeyExpr<'static>>,
         node_id: NodeId,
     ) -> Result<Self> {
+        let prefix = prefix.into();
         // Declare on pattern: <prefix>/host/<host_id>/*
-        let host_client_keyexpr = HostClientKeyexpr::new(prefix, Some(node_id.clone()), None);
+        let host_client_keyexpr = HostClientKeyexpr::new(prefix.clone(), Some(node_id.clone()), None);
         let keyexpr: KeyExpr = host_client_keyexpr.into();
 
         // Declare queryable without callback
@@ -143,7 +144,7 @@ impl HostQueryable {
         Ok(Self {
             queryable,
             node_id,
-            prefix: prefix.clone().into_owned(),
+            prefix,
         })
     }
 
@@ -194,7 +195,7 @@ impl HostQueryable {
                                 query_keyexpr.as_str()
                             );
                             let reply_host_client = HostClientKeyexpr::new(
-                                &self.prefix,
+                                self.prefix.clone(),
                                 Some(self.node_id.clone()),
                                 Some(client_id.clone()),
                             );
