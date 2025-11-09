@@ -22,9 +22,9 @@
 //! - If it matches `<host_id>/*` pattern with specific client_id → Connection request (pushed to channel)
 //! - If it matches `<host_id>/*` pattern with glob client_id → Discovery request (replied immediately)
 
-use crate::types::NodeId;
 use crate::error::Result;
 use crate::network::keyexpr::HostClientKeyexpr;
+use crate::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 use zenoh::query::{Query, Queryable};
 
@@ -40,20 +40,29 @@ pub struct NodeRequest {
 
 impl NodeRequest {
     /// Create a new NodeRequest from a Query and client_id
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if query keyexpr is not HostClientKeyexpr(Some, Some) with matching client_id.
     pub fn new(query: Query, client_id: NodeId) -> Self {
         let parsed = HostClientKeyexpr::try_from(query.key_expr().clone())
             .expect("Invalid HostClientKeyexpr");
-        assert!(parsed.host_id().is_some(), "Glob host_id");
-        assert_eq!(
-            parsed.client_id().as_ref().expect("Glob client_id"),
-            &client_id,
-            "Client ID mismatch"
+        assert!(
+            parsed.host_id().is_some(),
+            "Expected specific host_id in query keyexpr: {}",
+            query.key_expr().as_str()
         );
-        
+        assert_eq!(
+            parsed.client_id().as_ref().unwrap_or_else(|| panic!(
+                "Expected specific client_id in query keyexpr: {}",
+                query.key_expr().as_str()
+            )),
+            &client_id,
+            "Client ID mismatch: expected '{}', found '{}'",
+            client_id,
+            parsed.client_id().as_ref().unwrap()
+        );
+
         Self { query, client_id }
     }
 
@@ -65,7 +74,7 @@ impl NodeRequest {
     /// Returns the client ID.
     pub async fn accept(self) -> Result<NodeId> {
         let keyexpr = self.query.key_expr();
-        
+
         // Reply to the same keyexpr from the query. This is safe because NodeRequest
         // is only created for connection requests with specific client_id (no globs).
         self.query
@@ -124,7 +133,7 @@ impl NodeQueryable {
         // Declare on pattern: <prefix>/host/<host_id>/*
         let host_client_keyexpr = HostClientKeyexpr::new(prefix, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = host_client_keyexpr.into();
-        
+
         // Declare queryable without callback
         let queryable = session
             .declare_queryable(&keyexpr)
@@ -146,47 +155,66 @@ impl NodeQueryable {
     pub async fn expect_connection(&self) -> Result<NodeRequest> {
         loop {
             // Receive next query from queryable
-            let query = self.queryable
-                .recv_async()
-                .await
-                .map_err(|_| crate::error::ArenaError::Internal(
-                    "Queryable channel closed".to_string(),
-                ))?;
-            
+            let query = self.queryable.recv_async().await.map_err(|_| {
+                crate::error::ArenaError::Internal("Queryable channel closed".to_string())
+            })?;
+
             // Parse the incoming query keyexpr to determine if it's discovery or connection
             let query_keyexpr = query.key_expr().clone();
-            
-            // Try to parse as HostClientKeyexpr to extract client_id
+
+            // Try to parse as HostClientKeyexpr to extract host_id and client_id
             match HostClientKeyexpr::try_from(query_keyexpr.clone()) {
-                Ok(parsed_keyexpr) => {
-                    match parsed_keyexpr.client_id() {
-                        Some(client_id) => {
-                            // Connection request (specific client_id): return it
+                Ok(parsed) => {
+                    match (parsed.host_id(), parsed.client_id()) {
+                        (Some(host_id), Some(client_id)) => {
+                            assert_eq!(
+                                host_id,
+                                &self.node_id,
+                                "Host ID mismatch: expected '{}', found '{}'",
+                                self.node_id,
+                                host_id
+                            );
+                            // Connection request (specific host id and client_id): return it
                             return Ok(NodeRequest::new(query, client_id.clone()));
                         }
-                        None => {
-                            // Discovery request (glob client_id): reply ok immediately
-                            // This just confirms host presence for discovery phase
+                        (Some(host_id), None) => {
+                            // ignore invalid case: specific host_id but glob client_id
+                            tracing::debug!(
+                                "Invalid query with specific host_id '{}' but glob client_id: {}",
+                                host_id,
+                                query_keyexpr.as_str()
+                            );
+                        }
+                        (None, Some(client_id)) => {
+                            // request from specific client_id but glob host_id - corect discovery case
+                            // Trace and reply with ok, confirming presence
+                            tracing::debug!(
+                                "Discovery request from client_id '{}' with glob host_id: {}",
+                                client_id,
+                                query_keyexpr.as_str()
+                            );
                             let reply_host_client = HostClientKeyexpr::new(
                                 &self.prefix,
                                 Some(self.node_id.clone()),
-                                None, // glob on client_id
+                                Some(client_id.clone()),
                             );
                             let reply_keyexpr: KeyExpr = reply_host_client.into();
-                            
                             if let Err(e) = query.reply(&reply_keyexpr, "").await {
                                 tracing::debug!("Failed to reply to discovery query: {}", e);
                             }
-                            // Continue loop to wait for connection request
+                        }
+                        (None, None) => {
+                            // ignore invalid case: glob host_id and glob client_id
+                            tracing::debug!(
+                                "Invalid query with glob host_id and glob client_id: {}",
+                                query_keyexpr.as_str()
+                            );
                         }
                     }
                 }
                 Err(_) => {
                     // Failed to parse keyexpr, ignore and continue
-                    tracing::debug!(
-                        "Failed to parse query keyexpr: {}",
-                        query_keyexpr.as_str()
-                    );
+                    tracing::debug!("Failed to parse query keyexpr: {}", query_keyexpr.as_str());
                 }
             }
         }
