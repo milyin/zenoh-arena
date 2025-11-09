@@ -175,7 +175,7 @@ where
         /// Game engine (only present in Host mode)
         #[allow(dead_code)]
         engine: E,
-        /// Liveliness token
+        /// Liveliness token for host discovery
         #[allow(dead_code)]
         liveliness_token: Option<NodeLivelinessToken>,
         /// Queryable for host discovery
@@ -263,7 +263,7 @@ where
     {
         let prefix = prefix.into();
 
-        // Create liveliness token
+        // Create host liveliness token for discovery
         let token = NodeLivelinessToken::declare(session, prefix.clone(), Role::Host, node_id.clone()).await?;
 
         // Declare queryable for host discovery
@@ -280,6 +280,8 @@ where
     }
 
     /// Transition from SearchingHost to Client state
+    ///
+    /// Subscribes to liveliness events for the host
     #[allow(dead_code)]
     pub async fn client(
         &mut self,

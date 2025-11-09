@@ -1,8 +1,7 @@
 /// Node management module
-use std::sync::Arc;
-
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
+use crate::network::NodeLivelinessToken;
 use crate::network::host_queryable::HostRequest;
 use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
 
@@ -30,8 +29,8 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
     /// Current node state
     state: NodeStateInternal<E>,
 
-    /// Zenoh session (wrapped for shared access)
-    session: Arc<zenoh::Session>,
+    /// Zenoh session
+    session: zenoh::Session,
 
     /// Engine factory - called when transitioning to host mode
     #[allow(dead_code)]
@@ -42,6 +41,11 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
 
     /// Sender for commands from the application
     command_tx: flume::Sender<NodeCommand<E::Action>>,
+
+    /// Liveliness token for this node's identity (Role::Node)
+    /// Kept throughout the node's lifetime to protect against other nodes with the same name
+    #[allow(dead_code)]
+    node_liveliness_token: NodeLivelinessToken,
 }
 
 impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
@@ -54,6 +58,16 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         let id = config.node_id.clone();
 
         tracing::info!("Node '{}' initialized with Zenoh session", id);
+
+        // Create liveliness token for this node's identity (Role::Node)
+        // This protects the node name from conflicts with other nodes
+        let node_liveliness_token = NodeLivelinessToken::declare(
+            &session,
+            config.keyexpr_prefix.clone(),
+            crate::network::Role::Node,
+            id.clone(),
+        )
+        .await?;
 
         // Create command channel
         let (command_tx, command_rx) = flume::unbounded();
@@ -75,10 +89,11 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             id,
             config,
             state,
-            session: Arc::new(session),
+            session,
             get_engine,
             command_rx,
             command_tx,
+            node_liveliness_token,
         };
 
         Ok(node)
@@ -90,7 +105,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     }
 
     /// Get reference to Zenoh session
-    pub fn session(&self) -> &Arc<zenoh::Session> {
+    pub fn session(&self) -> &zenoh::Session {
         &self.session
     }
 
