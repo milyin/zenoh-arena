@@ -182,6 +182,16 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 
         // Process commands until timeout or new state
         loop {
+            // Get a fresh reference to queryable for this iteration
+            let queryable = if let NodeStateInternal::Host { queryable: Some(q), .. } = &self.state {
+                q
+            } else {
+                return Ok(Some(NodeStatus {
+                    state: NodeState::from(&self.state),
+                    game_state: None,
+                }));
+            };
+
             tokio::select! {
                 // Timeout elapsed
                 () = &mut sleep => {
@@ -191,8 +201,8 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     }));
                 }
                 // Query received from a client (connection request)
-                request_result = self.expect_connection() => {
-                    if let Some(_request) = request_result {
+                request_result = queryable.expect_connection() => {
+                    if let Ok(_request) = request_result {
                         tracing::debug!("Node '{}' received connection request from client", self.id);
                         // TODO: Process request and send response with host info
                     }
@@ -225,16 +235,6 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 }
             }
         }
-    }
-
-    /// Accept a connection request from a client
-    ///
-    /// Returns a NodeRequest if a client is connecting, or None if not in Host state.
-    async fn expect_connection(&self) -> Option<crate::network::NodeRequest> {
-        if let NodeStateInternal::Host { queryable: Some(q), .. } = &self.state {
-            return q.expect_connection().await.ok();
-        }
-        None
     }
 
     /// Search for available hosts and attempt to connect
