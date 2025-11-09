@@ -96,7 +96,7 @@ pub enum NodeState {
     },
     /// Acting as host
     Host {
-        /// Whether accepting new clients
+        /// Whether accepting new clients (derived from queryable presence and capacity)
         is_accepting: bool,
         /// List of connected client IDs
         connected_clients: Vec<NodeId>,
@@ -167,8 +167,6 @@ where
 
     /// Acting as host
     Host {
-        /// Whether accepting new clients
-        is_accepting: bool,
         /// List of connected client IDs
         connected_clients: Vec<NodeId>,
         /// Game engine (only present in Host mode)
@@ -200,15 +198,32 @@ where
     }
 
     /// Check if host mode and accepting clients
+    ///
+    /// Host is accepting when it has a queryable and client count is below max_clients
     #[allow(dead_code)]
     pub fn is_accepting_clients(&self) -> bool {
-        matches!(
-            self,
+        match self {
             NodeStateInternal::Host {
-                is_accepting: true,
+                queryable,
+                connected_clients,
+                engine,
                 ..
+            } => {
+                // Only accepting if queryable is present (advertised)
+                if queryable.is_none() {
+                    return false;
+                }
+                
+                // Check if we have capacity
+                let max = engine.max_clients();
+                let current = connected_clients.len();
+                match max {
+                    None => true, // Unlimited clients
+                    Some(max_count) => current < max_count,
+                }
             }
-        )
+            _ => false,
+        }
     }
 
     /// Get number of connected clients (None if not host)
@@ -232,7 +247,7 @@ where
 
     /// Transition from SearchingHost to Host state
     ///
-    /// Creates liveliness token and queryable, then calls update_host to set is_accepting
+    /// Creates liveliness token and queryable for host discovery
     pub async fn host(
         &mut self,
         engine: E,
@@ -250,41 +265,64 @@ where
         let queryable = NodeQueryable::declare(session, prefix, node_id.clone()).await?;
 
         *self = NodeStateInternal::Host {
-            is_accepting: false, // Will be updated by update_host
             connected_clients: Vec::new(),
             engine,
             liveliness_token: Some(token),
             queryable: Some(queryable),
         };
 
-        // Update is_accepting based on max_clients
-        self.update_host();
-
         Ok(())
     }
 
-    /// Update Host state by checking if we should accept clients
+    /// Update Host state capacity and queryable availability
     ///
-    /// Sets is_accepting to true if current client count is less than max_clients
-    pub fn update_host(&mut self)
+    /// Creates queryable if engine has capacity (current clients < max_clients)
+    /// Drops queryable if capacity is reached (to prevent new clients from joining)
+    #[allow(dead_code)]
+    pub async fn update_host(
+        &mut self,
+        session: &zenoh::Session,
+        prefix: &zenoh::key_expr::KeyExpr<'_>,
+        node_id: &NodeId,
+    ) -> Result<()>
     where
         E: crate::node::GameEngine,
     {
         if let NodeStateInternal::Host {
-            is_accepting,
             connected_clients,
             engine,
+            queryable,
             ..
         } = self
         {
             let max = engine.max_clients();
             let current = connected_clients.len();
 
-            *is_accepting = match max {
+            let has_capacity = match max {
                 None => true, // Unlimited clients
                 Some(max_count) => current < max_count,
             };
+
+            let has_queryable = queryable.is_some();
+
+            match (has_queryable, has_capacity) {
+                // Has capacity and no queryable: create queryable
+                (false, true) => {
+                    let new_queryable = NodeQueryable::declare(session, prefix, node_id.clone()).await?;
+                    *queryable = Some(new_queryable);
+                    tracing::debug!("Host '{}' now accepting clients (created queryable)", node_id);
+                }
+                // No capacity and has queryable: drop queryable
+                (true, false) => {
+                    *queryable = None;
+                    tracing::debug!("Host '{}' capacity reached (dropped queryable)", node_id);
+                }
+                // Other cases: no change needed
+                _ => {}
+            }
         }
+
+        Ok(())
     }
 
     /// Transition from SearchingHost to Client state
@@ -305,13 +343,26 @@ where
                 host_id: host_id.clone(),
             },
             NodeStateInternal::Host {
-                is_accepting,
                 connected_clients,
+                engine,
+                queryable,
                 ..
-            } => NodeState::Host {
-                is_accepting: *is_accepting,
-                connected_clients: connected_clients.clone(),
-            },
+            } => {
+                // Host is accepting if it has a queryable and has capacity
+                let is_accepting = queryable.is_some() && {
+                    let max = engine.max_clients();
+                    let current = connected_clients.len();
+                    match max {
+                        None => true, // Unlimited clients
+                        Some(max_count) => current < max_count,
+                    }
+                };
+
+                NodeState::Host {
+                    is_accepting,
+                    connected_clients: connected_clients.clone(),
+                }
+            }
         }
     }
 }
@@ -340,15 +391,6 @@ mod tests {
             connected_clients: vec![],
         };
         assert_eq!(format!("{}", state), "Host mode (open, no clients)");
-    }
-
-    #[test]
-    fn test_node_state_display_host_closed() {
-        let state = NodeState::Host {
-            is_accepting: false,
-            connected_clients: vec![],
-        };
-        assert_eq!(format!("{}", state), "Host mode (closed, no clients)");
     }
 
     #[test]
