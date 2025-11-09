@@ -46,15 +46,13 @@ impl NodeLivelinessToken {
 /// This is used by clients to detect when their connected host goes offline and needs
 /// to return to the host search stage.
 pub struct NodeLivelinessWatch {
-    session: std::sync::Arc<zenoh::Session>,
-    host_keyexpr: KeyExpr<'static>,
+    subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
     host_id: NodeId,
 }
 
 impl std::fmt::Debug for NodeLivelinessWatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeLivelinessWatch")
-            .field("host_keyexpr", &self.host_keyexpr.as_str())
             .field("host_id", &self.host_id)
             .finish()
     }
@@ -73,9 +71,14 @@ impl NodeLivelinessWatch {
         let host_keyexpr = HostKeyexpr::new(prefix, Some(host_id.clone()));
         let keyexpr: KeyExpr = host_keyexpr.into();
         
+        let subscriber = session
+            .liveliness()
+            .declare_subscriber(keyexpr)
+            .await
+            .map_err(crate::error::ArenaError::Zenoh)?;
+        
         Ok(Self {
-            session: std::sync::Arc::new(session.clone()),
-            host_keyexpr: keyexpr.into_owned(),
+            subscriber,
             host_id,
         })
     }
@@ -88,16 +91,9 @@ impl NodeLivelinessWatch {
     ///
     /// Similar to `NodeQueryable::expect_connection()`, this loops until the
     /// expected event (liveliness delete) is detected.
-    pub async fn disconnected(self) -> Result<()> {
-        // Declare a subscriber for liveliness events on the host keyexpr
-        let subscriber = self.session
-            .liveliness()
-            .declare_subscriber(&self.host_keyexpr)
-            .await
-            .map_err(crate::error::ArenaError::Zenoh)?;
-
+    pub async fn disconnected(&mut self) -> Result<()> {
         loop {
-            match subscriber.recv_async().await {
+            match self.subscriber.recv_async().await {
                 Ok(sample) => {
                     match sample.kind() {
                         SampleKind::Put => {

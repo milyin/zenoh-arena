@@ -165,8 +165,7 @@ where
         /// ID of the host we're connected to
         host_id: NodeId,
         /// Watches for host liveliness to detect disconnection
-        #[allow(dead_code)]
-        liveliness_watch: Option<NodeLivelinessWatch>,
+        liveliness_watch: NodeLivelinessWatch,
     },
 
     /// Acting as host
@@ -345,7 +344,7 @@ where
 
         *self = NodeStateInternal::Client {
             host_id,
-            liveliness_watch: Some(liveliness_watch),
+            liveliness_watch,
         };
         
         Ok(())
