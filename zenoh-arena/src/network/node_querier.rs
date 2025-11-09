@@ -27,7 +27,7 @@
 
 use crate::types::NodeId;
 use crate::error::Result;
-use crate::network::keyexpr::{HostLookupKeyexpr, HostClientKeyexpr, HostKeyexpr};
+use crate::network::keyexpr::{HostClientKeyexpr, HostKeyexpr};
 use zenoh::key_expr::KeyExpr;
 
 /// Helper for connecting to available hosts
@@ -57,7 +57,7 @@ impl NodeQuerier {
         tracing::debug!("Discovering available hosts...");
 
         // Phase 1: Discover all available hosts
-        let discover_keyexpr = HostLookupKeyexpr::new(prefix);
+        let discover_keyexpr = HostKeyexpr::new(prefix, None);
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
@@ -71,9 +71,10 @@ impl NodeQuerier {
                     let keyexpr = sample.key_expr().clone();
                     match HostKeyexpr::try_from(keyexpr.clone()) {
                         Ok(host_keyexpr) => {
-                            let host_id = host_keyexpr.host_id().clone();
-                            tracing::debug!("Discovered host: {}", host_id);
-                            host_ids.push(host_id);
+                            if let Some(host_id) = host_keyexpr.host_id() {
+                                tracing::debug!("Discovered host: {}", host_id);
+                                host_ids.push(host_id.clone());
+                            }
                         }
                         Err(e) => {
                             tracing::debug!("Failed to parse host_id from keyexpr {}: {}", keyexpr.as_str(), e);
@@ -95,7 +96,7 @@ impl NodeQuerier {
 
         // Phase 2: Try connecting to each discovered host
         for host_id in host_ids {
-            let connect_keyexpr = HostClientKeyexpr::new(prefix, host_id.clone(), client_id.clone());
+            let connect_keyexpr = HostClientKeyexpr::new(prefix, host_id.clone(), Some(client_id.clone()));
             let connect_keyexpr: KeyExpr = connect_keyexpr.into();
             
             match session.get(connect_keyexpr).await {

@@ -23,7 +23,7 @@ impl NodeLivelinessToken {
         prefix: &KeyExpr<'_>,
         node_id: NodeId,
     ) -> Result<Self, zenoh::Error> {
-        let host_keyexpr = HostKeyexpr::new(prefix, node_id.clone());
+        let host_keyexpr = HostKeyexpr::new(prefix, Some(node_id.clone()));
         let keyexpr: KeyExpr = host_keyexpr.into();
         let token = session
             .liveliness()
