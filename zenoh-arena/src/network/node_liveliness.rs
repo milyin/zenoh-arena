@@ -3,6 +3,8 @@
 use crate::error::Result;
 use crate::network::keyexpr::{NodeKeyexpr, Role};
 use crate::types::NodeId;
+use futures::future::select_all;
+use std::pin::Pin;
 use zenoh::key_expr::KeyExpr;
 use zenoh::liveliness::LivelinessToken;
 use zenoh::sample::SampleKind;
@@ -142,48 +144,53 @@ impl NodeLivelinessWatch {
             ));
         }
 
-        // Process all subscribers and wait for any to disconnect
-        loop {
-            // Check each subscriber for disconnect event
-            for (node_id, subscriber) in self.subscribers.iter_mut() {
-                match subscriber.try_recv() {
-                    Ok(Some(sample)) => {
-                        match sample.kind() {
-                            SampleKind::Delete => {
-                                // Node went offline, liveliness lost
-                                tracing::info!(
-                                    "Node '{}' liveliness lost - disconnecting",
-                                    node_id
-                                );
-                                return Ok(node_id.clone());
+        // Create a future for each subscriber
+        let futures_vec: Vec<_> = self
+            .subscribers
+            .iter_mut()
+            .map(|(node_id, subscriber)| {
+                let node_id = node_id.clone();
+                Box::pin(async move {
+                    loop {
+                        match subscriber.recv_async().await {
+                            Ok(sample) => {
+                                match sample.kind() {
+                                    SampleKind::Delete => {
+                                        // Node went offline, liveliness lost
+                                        tracing::info!(
+                                            "Node '{}' liveliness lost - disconnecting",
+                                            node_id
+                                        );
+                                        return Ok(node_id.clone());
+                                    }
+                                    SampleKind::Put => {
+                                        // Node came online or re-established liveliness, continue waiting
+                                        tracing::debug!(
+                                            "Node '{}' liveliness put event",
+                                            node_id
+                                        );
+                                        // Continue waiting for Delete event
+                                    }
+                                }
                             }
-                            SampleKind::Put => {
-                                // Node came online or re-established liveliness, continue waiting
-                                tracing::debug!(
-                                    "Node '{}' liveliness put event",
-                                    node_id
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Liveliness subscription error for node '{}': {}",
+                                    node_id,
+                                    e
                                 );
+                                // Subscription error is treated as disconnect
+                                return Ok(node_id.clone());
                             }
                         }
                     }
-                    Ok(None) => {
-                        // No message available (non-blocking)
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Liveliness subscription error for node '{}': {}",
-                            node_id,
-                            e
-                        );
-                        // Subscription error is treated as disconnect
-                        return Ok(node_id.clone());
-                    }
-                }
-            }
+                }) as Pin<Box<dyn std::future::Future<Output = Result<NodeId>> + Send>>
+            })
+            .collect();
 
-            // Wait a bit before checking again to avoid busy-spinning
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        // Wait for any future to complete
+        let (result, _index, _remaining) = select_all(futures_vec).await;
+        result
     }
 
     /// Get the host ID being watched
