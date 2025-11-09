@@ -39,7 +39,7 @@
 
 use crate::types::NodeId;
 use crate::error::Result;
-use crate::network::keyexpr::HostClientKeyexpr;
+use crate::network::keyexpr::{NodeKeyexpr, Role};
 use zenoh::key_expr::KeyExpr;
 
 /// Helper for connecting to available hosts
@@ -79,9 +79,9 @@ impl HostQuerier {
         let prefix = prefix.into();
 
         // Phase 1: Discover all available hosts
-        // Query: <prefix>/host/*/<client_id> (glob on host_id)
+        // Query: <prefix>/link/*/client_id (glob on own_id, specific remote_id)
         // This queries all hosts in the arena, asking them to confirm presence
-        let discover_keyexpr = HostClientKeyexpr::new(prefix.clone(), None, Some(client_id.clone()));
+        let discover_keyexpr = NodeKeyexpr::new(prefix.clone(), Role::Link, None, Some(client_id.clone()));
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
@@ -93,9 +93,9 @@ impl HostQuerier {
             match reply.result() {
                 Ok(sample) => {
                     let keyexpr = sample.key_expr().clone();
-                    match HostClientKeyexpr::try_from(keyexpr.clone()) {
-                        Ok(client_keyexpr) => {
-                            if let Some(host_id) = client_keyexpr.host_id() {
+                    match NodeKeyexpr::try_from(keyexpr.clone()) {
+                        Ok(parsed) => {
+                            if let Some(host_id) = parsed.own_id() {
                                 tracing::debug!("Discovered host: {}", host_id);
                                 host_ids.push(host_id.clone());
                             }
@@ -119,10 +119,10 @@ impl HostQuerier {
         tracing::info!("Discovered {} host(s), attempting connections", host_ids.len());
 
         // Phase 2: Try connecting to each discovered host
-        // Query: <prefix>/host/<host_id>/<client_id> (specific host_id and client_id)
+        // Query: <prefix>/link/<host_id>/<client_id> (specific own_id and remote_id)
         // This requests the specific host to confirm it accepts this client's connection
         for host_id in host_ids {
-            let connect_keyexpr = HostClientKeyexpr::new(prefix.clone(), Some(host_id.clone()), Some(client_id.clone()));
+            let connect_keyexpr = NodeKeyexpr::new(prefix.clone(), Role::Link, Some(host_id.clone()), Some(client_id.clone()));
             let connect_keyexpr: KeyExpr = connect_keyexpr.into();
             
             match session.get(connect_keyexpr).await {
