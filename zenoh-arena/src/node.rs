@@ -251,28 +251,16 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         tokio::pin!(sleep);
 
         // Wait for connection success or timeout
-        loop {
+        // Returns None if should become host, Some(host_id) if connected
+        let connected_host = loop {
             tokio::select! {
                 // Search timeout elapsed - no successful connection, become host
                 () = &mut sleep => {
                     tracing::info!(
-                        "Node '{}' search timeout - no hosts accepted connection, transitioning to host mode",
+                        "Node '{}' search timeout - no hosts accepted connection",
                         self.id
                     );
-                    
-                    // Transition to host state
-                    let engine = (self.get_engine)();
-                    self.state.host(
-                        engine,
-                        &self.session,
-                        &self.config.keyexpr_prefix,
-                        &self.id
-                    ).await?;
-
-                    return Ok(Some(NodeStatus {
-                        state: NodeState::from(&self.state),
-                        game_state: None,
-                    }));
+                    break None;
                 }
                 // Try to connect to available hosts
                 connection_result = NodeQuerier::connect(&self.session, &self.config.keyexpr_prefix) => {
@@ -280,38 +268,16 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                         Ok(Some(host_id)) => {
                             // Successfully connected to a host
                             tracing::info!("Node '{}' connected to host: {}", self.id, host_id);
-                            
-                            self.state.client(host_id);
-                            
-                            return Ok(Some(NodeStatus {
-                                state: NodeState::from(&self.state),
-                                game_state: None,
-                            }));
+                            break Some(host_id);
                         }
                         Ok(None) => {
                             // No hosts available, become host
-                            tracing::info!(
-                                "Node '{}' no hosts available, transitioning to host mode",
-                                self.id
-                            );
-                            
-                            let engine = (self.get_engine)();
-                            self.state.host(
-                                engine,
-                                &self.session,
-                                &self.config.keyexpr_prefix,
-                                &self.id
-                            ).await?;
-
-                            return Ok(Some(NodeStatus {
-                                state: NodeState::from(&self.state),
-                                game_state: None,
-                            }));
+                            tracing::info!("Node '{}' no hosts available", self.id);
+                            break None;
                         }
                         Err(e) => {
                             tracing::warn!("Node '{}' query error during search: {}", self.id, e);
-                            // Continue waiting for timeout
-                            continue;
+                            return Err(e);
                         }
                     }
                 }
@@ -334,6 +300,26 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     }
                 }
             }
+        };
+
+        // Handle connection result - state transition after select!
+        if let Some(host_id) = connected_host {
+            self.state.client(host_id);
+            Ok(Some(NodeStatus {
+                state: NodeState::from(&self.state),
+                game_state: None,
+            }))
+        } else {
+            self.state.host(
+                (self.get_engine)(),
+                &self.session,
+                &self.config.keyexpr_prefix,
+                &self.id
+            ).await?;
+            Ok(Some(NodeStatus {
+                state: NodeState::from(&self.state),
+                game_state: None,
+            }))
         }
     }
 
