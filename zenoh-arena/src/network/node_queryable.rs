@@ -98,7 +98,7 @@ pub struct NodeQueryable {
     /// Node ID for formatting replies
     node_id: NodeId,
     /// Prefix for formatting replies
-    prefix: String,
+    prefix: KeyExpr<'static>,
 }
 
 impl NodeQueryable {
@@ -123,7 +123,7 @@ impl NodeQueryable {
         Ok(Self {
             queryable,
             node_id,
-            prefix: prefix.to_string(),
+            prefix: prefix.clone().into_owned(),
         })
     }
 
@@ -156,10 +156,14 @@ impl NodeQueryable {
                         None => {
                             // Discovery request (glob client_id): reply ok immediately
                             // This just confirms host presence for discovery phase
-                            let reply_keyexpr = format!("{}/host/{}/", 
-                                self.prefix, self.node_id.as_str());
+                            let reply_host_client = HostClientKeyexpr::new(
+                                &self.prefix,
+                                Some(self.node_id.clone()),
+                                None, // glob on client_id
+                            );
+                            let reply_keyexpr: KeyExpr = reply_host_client.into();
                             
-                            if let Err(e) = query.reply(reply_keyexpr, "").await {
+                            if let Err(e) = query.reply(&reply_keyexpr, "").await {
                                 tracing::debug!("Failed to reply to discovery query: {}", e);
                             }
                             // Continue loop to wait for connection request
@@ -175,5 +179,17 @@ impl NodeQueryable {
                 }
             }
         }
+    }
+
+    /// Receive a raw query without filtering
+    ///
+    /// Used for testing or when direct query access is needed.
+    pub async fn recv_query(&self) -> Result<Query> {
+        self.queryable
+            .recv_async()
+            .await
+            .map_err(|_| crate::error::ArenaError::Internal(
+                "Queryable channel closed".to_string(),
+            ))
     }
 }

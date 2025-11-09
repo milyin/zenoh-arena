@@ -232,7 +232,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Returns Some(query) if a query was received, None if no query is available
     async fn receive_query(&self) -> Option<zenoh::query::Query> {
         if let NodeStateInternal::Host { queryable: Some(q), .. } = &self.state {
-            return q.receiver().recv_async().await.ok();
+            return q.recv_query().await.ok();
         }
         None
     }
