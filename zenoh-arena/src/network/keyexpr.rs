@@ -227,55 +227,6 @@ impl From<NodeKeyexpr> for KeyExpr<'static> {
     }
 }
 
-/// Node keyexpr - wrapper for NodeKeyexpr with Node role
-///
-/// Pattern: `<prefix>/node/<node_id>` (when node_id is Some)
-/// Pattern: `<prefix>/node/*` (when node_id is None)
-///
-/// Used for:
-/// - Declaring queryables for node-related operations
-/// - Connecting to a specific node
-/// - Discovering all available nodes (when node_id is None)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeKeyexprWrapper(NodeKeyexpr);
-
-impl NodeKeyexprWrapper {
-    /// Create a new NodeKeyexprWrapper
-    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, node_id: Option<NodeId>) -> Self {
-        Self(NodeKeyexpr::new(prefix, Role::Node, node_id, None))
-    }
-
-    /// Get the node ID (None means wildcard)
-    pub fn node_id(&self) -> &Option<NodeId> {
-        self.0.own_id()
-    }
-
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.0.prefix()
-    }
-}
-
-impl TryFrom<KeyExpr<'_>> for NodeKeyexprWrapper {
-    type Error = ArenaError;
-
-    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-        let node_keyexpr = NodeKeyexpr::try_from(keyexpr)?;
-        if node_keyexpr.role() != Role::Node {
-            return Err(ArenaError::InvalidKeyexpr(
-                "Expected Node role in keyexpr".to_string(),
-            ));
-        }
-        Ok(Self(node_keyexpr))
-    }
-}
-
-impl From<NodeKeyexprWrapper> for KeyExpr<'static> {
-    fn from(node_keyexpr: NodeKeyexprWrapper) -> Self {
-        KeyExpr::from(node_keyexpr.0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
