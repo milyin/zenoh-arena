@@ -386,6 +386,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         let NodeStateInternal::Host {
             engine,
             connected_clients,
+            queryable,
             ..
         } = &mut self.state
         else {
@@ -414,6 +415,18 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                             .unwrap_or_else(|| "unlimited".to_string())
                     );
                     connected_clients.push(client_id);
+
+                    // Update queryable if we've reached capacity
+                    let new_count = connected_clients.len();
+                    let has_capacity = match max_allowed {
+                        None => true, // Unlimited clients
+                        Some(max_count) => new_count < max_count,
+                    };
+
+                    if !has_capacity && queryable.is_some() {
+                        *queryable = None;
+                        tracing::debug!("Host '{}' capacity reached (dropped queryable)", self.id);
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("Node '{}' failed to accept connection: {:?}", self.id, e);

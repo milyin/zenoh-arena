@@ -279,56 +279,6 @@ where
         Ok(())
     }
 
-    /// Update Host state capacity and queryable availability
-    ///
-    /// Creates queryable if engine has capacity (current clients < max_clients)
-    /// Drops queryable if capacity is reached (to prevent new clients from joining)
-    pub async fn update_host(
-        &mut self,
-        session: &zenoh::Session,
-        prefix: impl Into<KeyExpr<'static>>,
-        node_id: &NodeId,
-    ) -> Result<()>
-    where
-        E: crate::node::GameEngine,
-    {
-        if let NodeStateInternal::Host {
-            connected_clients,
-            engine,
-            queryable,
-            ..
-        } = self
-        {
-            let max = engine.max_clients();
-            let current = connected_clients.len();
-
-            let has_capacity = match max {
-                None => true, // Unlimited clients
-                Some(max_count) => current < max_count,
-            };
-
-            let has_queryable = queryable.is_some();
-
-            match (has_queryable, has_capacity) {
-                // Has capacity and no queryable: create queryable
-                (false, true) => {
-                    let new_queryable = HostQueryable::declare(session, prefix, node_id.clone()).await?;
-                    *queryable = Some(new_queryable);
-                    tracing::debug!("Host '{}' now accepting clients (created queryable)", node_id);
-                }
-                // No capacity and has queryable: drop queryable
-                (true, false) => {
-                    *queryable = None;
-                    tracing::debug!("Host '{}' capacity reached (dropped queryable)", node_id);
-                }
-                // Other cases: no change needed
-                _ => {}
-            }
-        }
-
-        Ok(())
-    }
-
     /// Transition from SearchingHost to Client state
     #[allow(dead_code)]
     pub async fn client(
