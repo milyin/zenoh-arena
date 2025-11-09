@@ -35,12 +35,26 @@ use zenoh::query::{Query, Queryable};
 #[derive(Debug, Clone)]
 pub struct NodeRequest {
     query: Query,
+    client_id: NodeId,
 }
 
 impl NodeRequest {
-    /// Create a new NodeRequest from a Query
-    pub fn new(query: Query) -> Self {
-        Self { query }
+    /// Create a new NodeRequest from a Query and client_id
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if query keyexpr is not HostClientKeyexpr(Some, Some) with matching client_id.
+    pub fn new(query: Query, client_id: NodeId) -> Self {
+        let parsed = HostClientKeyexpr::try_from(query.key_expr().clone())
+            .expect("Invalid HostClientKeyexpr");
+        assert!(parsed.host_id().is_some(), "Glob host_id");
+        assert_eq!(
+            parsed.client_id().as_ref().expect("Glob client_id"),
+            &client_id,
+            "Client ID mismatch"
+        );
+        
+        Self { query, client_id }
     }
 
     /// Accept the connection request
@@ -48,26 +62,18 @@ impl NodeRequest {
     /// Sends a positive reply (ok) with empty payload to the querying client.
     /// This confirms that the host accepts this client's connection.
     ///
-    /// Returns the client ID extracted from the query keyexpr.
+    /// Returns the client ID.
     pub async fn accept(self) -> Result<NodeId> {
-        let keyexpr = self.query.key_expr().clone();
+        let keyexpr = self.query.key_expr();
         
-        // Parse the keyexpr to extract client_id
-        let client_keyexpr = HostClientKeyexpr::try_from(keyexpr)?;
-        let client_id = client_keyexpr.client_id()
-            .as_ref()
-            .cloned()
-            .ok_or(crate::error::ArenaError::Internal(
-                "Connection request missing client_id in keyexpr".to_string(),
-            ))?;
-
-        // Reply with ok to confirm acceptance
+        // Reply to the same keyexpr from the query. This is safe because NodeRequest
+        // is only created for connection requests with specific client_id (no globs).
         self.query
-            .reply(client_keyexpr.prefix().to_string(), "")
+            .reply(keyexpr, "")
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
 
-        Ok(client_id)
+        Ok(self.client_id)
     }
 
     /// Reject the connection request
@@ -149,9 +155,9 @@ impl NodeQueryable {
             match HostClientKeyexpr::try_from(query_keyexpr.clone()) {
                 Ok(parsed_keyexpr) => {
                     match parsed_keyexpr.client_id() {
-                        Some(_client_id) => {
+                        Some(client_id) => {
                             // Connection request (specific client_id): return it
-                            return Ok(NodeRequest::new(query));
+                            return Ok(NodeRequest::new(query, client_id.clone()));
                         }
                         None => {
                             // Discovery request (glob client_id): reply ok immediately
