@@ -27,6 +27,7 @@
 
 use crate::types::NodeId;
 use crate::error::Result;
+use crate::network::keyexpr::{HostLookupKeyexpr, HostClientKeyexpr};
 use zenoh::key_expr::KeyExpr;
 
 /// Helper for connecting to available hosts
@@ -42,7 +43,7 @@ impl NodeQuerier {
     ///
     /// Performs two-phase discovery:
     /// 1. Queries `<prefix>/host/*` to discover all hosts
-    /// 2. Queries each host at `<prefix>/host/<host_id>` for connection
+    /// 2. Queries each host at `<prefix>/host/<host_id>/<client_id>` for connection
     ///
     /// Returns:
     /// - `Ok(Some(host_id))` - Successfully connected to a host
@@ -51,14 +52,16 @@ impl NodeQuerier {
     pub async fn connect(
         session: &zenoh::Session,
         prefix: &KeyExpr<'_>,
+        client_id: NodeId,
     ) -> Result<Option<NodeId>> {
         tracing::debug!("Discovering available hosts...");
 
         // Phase 1: Discover all available hosts
-        let discover_keyexpr = crate::network::keyexpr::discover_hosts_keyexpr(prefix);
+        let discover_keyexpr = HostLookupKeyexpr::new(prefix);
+        let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
-        let host_ids = Vec::new();
+        let host_ids: Vec<NodeId> = Vec::new();
 
         // Collect all host IDs from discovery responses
         loop {
@@ -84,7 +87,8 @@ impl NodeQuerier {
 
         // Phase 2: Try connecting to each discovered host
         for host_id in host_ids {
-            let connect_keyexpr = crate::network::keyexpr::host_connect_keyexpr(prefix, &host_id);
+            let connect_keyexpr = HostClientKeyexpr::new(prefix, host_id.clone(), client_id.clone());
+            let connect_keyexpr: KeyExpr = connect_keyexpr.into();
             
             match session.get(connect_keyexpr).await {
                 Ok(connection_replies) => {

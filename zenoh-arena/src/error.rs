@@ -19,6 +19,10 @@ pub enum ArenaError {
     #[error("Invalid node name: {0}. Must be a valid single-chunk keyexpr (no /, *, $, ?, #, @)")]
     InvalidNodeName(String),
 
+    /// Invalid keyexpr pattern
+    #[error("Invalid keyexpr: {0}")]
+    InvalidKeyexpr(String),
+
     /// Invalid state transition attempted
     #[error("Invalid state transition: from {from:?} to {to:?}")]
     InvalidStateTransition {

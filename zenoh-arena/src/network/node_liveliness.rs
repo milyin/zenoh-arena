@@ -1,6 +1,7 @@
 //! Liveliness token management
 
 use crate::types::NodeId;
+use crate::network::keyexpr::HostKeyexpr;
 use zenoh::key_expr::KeyExpr;
 use zenoh::liveliness::LivelinessToken;
 
@@ -22,7 +23,8 @@ impl NodeLivelinessToken {
         prefix: &KeyExpr<'_>,
         node_id: NodeId,
     ) -> Result<Self, zenoh::Error> {
-        let keyexpr = crate::network::keyexpr::node_keyexpr(prefix, &node_id);
+        let host_keyexpr = HostKeyexpr::new(prefix, node_id.clone());
+        let keyexpr: KeyExpr = host_keyexpr.into();
         let token = session
             .liveliness()
             .declare_token(keyexpr)

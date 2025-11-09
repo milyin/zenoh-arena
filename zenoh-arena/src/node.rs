@@ -263,7 +263,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     break None;
                 }
                 // Try to connect to available hosts
-                connection_result = NodeQuerier::connect(&self.session, &self.config.keyexpr_prefix) => {
+                connection_result = NodeQuerier::connect(&self.session, &self.config.keyexpr_prefix, self.id.clone()) => {
                     match connection_result {
                         Ok(Some(host_id)) => {
                             // Successfully connected to a host
