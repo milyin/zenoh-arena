@@ -2,7 +2,7 @@
 use std::time::Instant;
 
 use crate::error::{ArenaError, Result};
-use crate::network::NodeLivelinessToken;
+use crate::network::{NodeLivelinessToken, NodeQueryable};
 
 /// Unique node identifier
 ///
@@ -177,6 +177,9 @@ where
         /// Liveliness token
         #[allow(dead_code)]
         liveliness_token: Option<NodeLivelinessToken>,
+        /// Queryable for host discovery
+        #[allow(dead_code)]
+        queryable: Option<NodeQueryable>,
     },
 }
 
@@ -229,7 +232,7 @@ where
 
     /// Transition from SearchingHost to Host state
     ///
-    /// Creates liveliness token and calls update_host to set is_accepting
+    /// Creates liveliness token and queryable, then calls update_host to set is_accepting
     pub async fn host(
         &mut self,
         engine: E,
@@ -243,11 +246,15 @@ where
         // Create liveliness token
         let token = NodeLivelinessToken::declare(session, prefix, node_id.clone()).await?;
 
+        // Declare queryable for host discovery
+        let queryable = NodeQueryable::declare(session, prefix, node_id.clone()).await?;
+
         *self = NodeStateInternal::Host {
             is_accepting: false, // Will be updated by update_host
             connected_clients: Vec::new(),
             engine,
             liveliness_token: Some(token),
+            queryable: Some(queryable),
         };
 
         // Update is_accepting based on max_clients
