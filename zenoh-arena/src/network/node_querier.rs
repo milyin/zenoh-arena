@@ -5,29 +5,41 @@
 //! The connection process consists of two phases:
 //!
 //! ### Phase 1: Host Discovery
-//! - Client sends query to `<prefix>/host/*` keyexpr
-//! - All active hosts respond via queryables on this pattern
+//! - Client sends query to `<prefix>/host/*/client_id` keyexpr (glob on host_id)
+//! - All active hosts respond via their single queryable on `<prefix>/host/<host_id>/*`
+//! - This acts as a presence confirmation: "I am a host, here's my ID"
 //! - Client collects all available host IDs from responses
 //!
 //! ### Phase 2: Connection Attempt
-//! - For each discovered host, client sends query to `<prefix>/host/<host_id>` keyexpr
-//! - Host responds via queryable on its specific keyexpr
+//! - For each discovered host, client sends query to `<prefix>/host/<host_id>/<client_id>` keyexpr
+//! - Host's same queryable on `<prefix>/host/<host_id>/*` responds to this specific keyexpr
+//! - This acts as a connection confirmation: "I accept your specific connection request"
 //! - If response is Ok, connection is established with that host
 //! - If no host responds positively, client returns None (will become host itself)
 //!
 //! ## Queryable Implementation (Future)
 //!
-//! Hosts will declare queryables to respond to these queries:
-//! - Queryable on `<prefix>/host/<host_id>` - responds to connection attempts
-//! - When receiving a query, host checks if it's accepting clients (has capacity)
-//! - If accepting: sends positive response (host info)
-//! - If at capacity: doesn't respond or sends rejection
+//! Hosts will declare a SINGLE queryable on `<prefix>/host/<host_id>/*` that responds to:
 //!
-//! This allows clients to discover available hosts and establish connections.
+//! 1. **Glob queries**: `<prefix>/host/<host_id>/*`
+//!    - Matches incoming glob discovery queries: `<prefix>/host/<host_id>/<client_id>`
+//!    - Keyexpr pattern: client_id is a wildcard
+//!    - Response: Confirms host presence (for discovery phase)
+//!
+//! 2. **Specific queries**: `<prefix>/host/<host_id>/<specific_client_id>`
+//!    - Matches incoming specific connection queries: `<prefix>/host/<host_id>/<specific_client_id>`
+//!    - Keyexpr pattern: client_id matches exactly
+//!    - Response: Confirms connection acceptance (for connection phase)
+//!
+//! The queryable can distinguish between phases by checking the incoming query keyexpr:
+//! - If client_id is None/wildcard in the query → discovery phase (return basic host info)
+//! - If client_id is specific in the query → connection phase (check capacity and accept/reject)
+//!
+//! This design allows a single queryable to handle both phases efficiently.
 
 use crate::types::NodeId;
 use crate::error::Result;
-use crate::network::keyexpr::{HostClientKeyexpr, HostKeyexpr};
+use crate::network::keyexpr::HostClientKeyexpr;
 use zenoh::key_expr::KeyExpr;
 
 /// Helper for connecting to available hosts
@@ -41,9 +53,17 @@ pub struct NodeQuerier;
 impl NodeQuerier {
     /// Connect to an available host
     ///
-    /// Performs two-phase discovery:
-    /// 1. Queries `<prefix>/host/*` to discover all hosts
-    /// 2. Queries each host at `<prefix>/host/<host_id>/<client_id>` for connection
+    /// Performs two-phase discovery and connection:
+    ///
+    /// **Phase 1: Host Discovery**
+    /// - Queries `<prefix>/host/*/<client_id>` (glob on host_id, specific client_id)
+    /// - All available hosts respond to this glob pattern
+    /// - Collects all discovered host IDs
+    ///
+    /// **Phase 2: Connection Establishment**
+    /// - For each discovered host, queries `<prefix>/host/<host_id>/<client_id>`
+    /// - Host confirms it accepts this specific connection request
+    /// - Returns the ID of the first host that accepts the connection
     ///
     /// Returns:
     /// - `Ok(Some(host_id))` - Successfully connected to a host
@@ -57,7 +77,9 @@ impl NodeQuerier {
         tracing::debug!("Discovering available hosts...");
 
         // Phase 1: Discover all available hosts
-        let discover_keyexpr = HostKeyexpr::new(prefix, None);
+        // Query: <prefix>/host/*/<client_id> (glob on host_id)
+        // This queries all hosts in the arena, asking them to confirm presence
+        let discover_keyexpr = HostClientKeyexpr::new(prefix, None, Some(client_id.clone()));
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
@@ -69,15 +91,15 @@ impl NodeQuerier {
             match reply.result() {
                 Ok(sample) => {
                     let keyexpr = sample.key_expr().clone();
-                    match HostKeyexpr::try_from(keyexpr.clone()) {
-                        Ok(host_keyexpr) => {
-                            if let Some(host_id) = host_keyexpr.host_id() {
+                    match HostClientKeyexpr::try_from(keyexpr.clone()) {
+                        Ok(client_keyexpr) => {
+                            if let Some(host_id) = client_keyexpr.host_id() {
                                 tracing::debug!("Discovered host: {}", host_id);
                                 host_ids.push(host_id.clone());
                             }
                         }
                         Err(e) => {
-                            tracing::debug!("Failed to parse host_id from keyexpr {}: {}", keyexpr.as_str(), e);
+                            tracing::debug!("Failed to parse keyexpr {}: {}", keyexpr.as_str(), e);
                         }
                     }
                 }
@@ -95,6 +117,8 @@ impl NodeQuerier {
         tracing::info!("Discovered {} host(s), attempting connections", host_ids.len());
 
         // Phase 2: Try connecting to each discovered host
+        // Query: <prefix>/host/<host_id>/<client_id> (specific host_id and client_id)
+        // This requests the specific host to confirm it accepts this client's connection
         for host_id in host_ids {
             let connect_keyexpr = HostClientKeyexpr::new(prefix, Some(host_id.clone()), Some(client_id.clone()));
             let connect_keyexpr: KeyExpr = connect_keyexpr.into();
