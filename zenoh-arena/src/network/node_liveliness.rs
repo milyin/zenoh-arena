@@ -11,22 +11,23 @@ use zenoh::sample::SampleKind;
 ///
 /// The token is automatically undeclared when dropped.
 #[derive(Debug)]
-pub struct HostLivelinessToken {
+pub struct NodeLivelinessToken {
     #[allow(dead_code)]
     token: LivelinessToken,
     #[allow(dead_code)]
     node_id: NodeId,
 }
 
-impl HostLivelinessToken {
-    /// Declare a new liveliness token for a host node
+impl NodeLivelinessToken {
+    /// Declare a new liveliness token for a node
     pub async fn declare(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
+        role: Role,
         node_id: NodeId,
     ) -> Result<Self> {
-        let host_keyexpr = NodeKeyexpr::new(prefix, Role::Host, Some(node_id.clone()), None);
-        let keyexpr: KeyExpr = host_keyexpr.into();
+        let node_keyexpr = NodeKeyexpr::new(prefix, role, Some(node_id.clone()), None);
+        let keyexpr: KeyExpr = node_keyexpr.into();
         let token = session
             .liveliness()
             .declare_token(keyexpr)
@@ -45,12 +46,12 @@ impl HostLivelinessToken {
 ///
 /// This is used by clients to detect when their connected host goes offline and needs
 /// to return to the host search stage.
-pub struct HostLivelinessWatch {
+pub struct NodeLivelinessWatch {
     subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
     host_id: NodeId,
 }
 
-impl std::fmt::Debug for HostLivelinessWatch {
+impl std::fmt::Debug for NodeLivelinessWatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeLivelinessWatch")
             .field("host_id", &self.host_id)
@@ -58,18 +59,19 @@ impl std::fmt::Debug for HostLivelinessWatch {
     }
 }
 
-impl HostLivelinessWatch {
-    /// Subscribe to liveliness events for a host node
+impl NodeLivelinessWatch {
+    /// Subscribe to liveliness events for a node
     ///
-    /// Creates a liveliness subscriber that tracks the presence of the specified host.
-    /// The subscriber will receive events when the host's liveliness token is declared or undeclared.
+    /// Creates a liveliness subscriber that tracks the presence of the specified node.
+    /// The subscriber will receive events when the node's liveliness token is declared or undeclared.
     pub async fn subscribe(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
-        host_id: NodeId,
+        role: Role,
+        node_id: NodeId,
     ) -> Result<Self> {
-        let host_keyexpr = NodeKeyexpr::new(prefix, Role::Host, Some(host_id.clone()), None);
-        let keyexpr: KeyExpr = host_keyexpr.into();
+        let node_keyexpr = NodeKeyexpr::new(prefix, role, Some(node_id.clone()), None);
+        let keyexpr: KeyExpr = node_keyexpr.into();
         
         let subscriber = session
             .liveliness()
@@ -80,7 +82,7 @@ impl HostLivelinessWatch {
         
         Ok(Self {
             subscriber,
-            host_id,
+            host_id: node_id,
         })
     }
 

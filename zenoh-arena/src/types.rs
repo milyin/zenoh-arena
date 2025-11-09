@@ -2,7 +2,7 @@
 use std::time::Instant;
 
 use crate::error::{ArenaError, Result};
-use crate::network::{HostLivelinessToken, HostLivelinessWatch, HostQueryable};
+use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, HostQueryable, Role};
 use zenoh::key_expr::KeyExpr;
 
 /// Unique node identifier
@@ -165,7 +165,7 @@ where
         /// ID of the host we're connected to
         host_id: NodeId,
         /// Watches for host liveliness to detect disconnection
-        liveliness_watch: HostLivelinessWatch,
+        liveliness_watch: NodeLivelinessWatch,
     },
 
     /// Acting as host
@@ -177,7 +177,7 @@ where
         engine: E,
         /// Liveliness token
         #[allow(dead_code)]
-        liveliness_token: Option<HostLivelinessToken>,
+        liveliness_token: Option<NodeLivelinessToken>,
         /// Queryable for host discovery
         #[allow(dead_code)]
         queryable: Option<HostQueryable>,
@@ -264,7 +264,7 @@ where
         let prefix = prefix.into();
 
         // Create liveliness token
-        let token = HostLivelinessToken::declare(session, prefix.clone(), node_id.clone()).await?;
+        let token = NodeLivelinessToken::declare(session, prefix.clone(), Role::Host, node_id.clone()).await?;
 
         // Declare queryable for host discovery
         let queryable = HostQueryable::declare(session, prefix.clone(), node_id.clone()).await?;
@@ -287,10 +287,10 @@ where
         prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
     ) -> Result<()> {
-        use crate::network::HostLivelinessWatch;
+        use crate::network::NodeLivelinessWatch;
         
         // Subscribe to liveliness events for the host
-        let liveliness_watch = HostLivelinessWatch::subscribe(session, prefix, host_id.clone())
+        let liveliness_watch = NodeLivelinessWatch::subscribe(session, prefix, Role::Host, host_id.clone())
             .await?;
 
         *self = NodeStateInternal::Client {
