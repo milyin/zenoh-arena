@@ -96,7 +96,7 @@ impl NodeQuerier {
 
         // Phase 2: Try connecting to each discovered host
         for host_id in host_ids {
-            let connect_keyexpr = HostClientKeyexpr::new(prefix, host_id.clone(), Some(client_id.clone()));
+            let connect_keyexpr = HostClientKeyexpr::new(prefix, Some(host_id.clone()), Some(client_id.clone()));
             let connect_keyexpr: KeyExpr = connect_keyexpr.into();
             
             match session.get(connect_keyexpr).await {

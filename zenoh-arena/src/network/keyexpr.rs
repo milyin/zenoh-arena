@@ -77,22 +77,23 @@ impl From<HostKeyexpr> for KeyExpr<'static> {
 
 /// Host client keyexpr - used for initiating client connections or discovering clients
 ///
-/// Pattern: `<prefix>/host/<host_id>/<client_id>` (when client_id is Some)
+/// Pattern: `<prefix>/host/<host_id>/<client_id>` (when both are Some)
 /// Pattern: `<prefix>/host/<host_id>/*` (when client_id is None)
+/// Pattern: `<prefix>/host/*/<client_id>` (when host_id is None)
+/// Pattern: `<prefix>/host/*/*` (when both are None)
 ///
 /// Used when a client initiates a connection request to a specific host.
-/// Contains the target host ID and optionally the requesting client ID.
-/// When client_id is None, can be used to discover all clients connected to a host.
+/// Supports glob patterns for flexible matching on host_id and/or client_id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostClientKeyexpr {
     prefix: String,
-    host_id: NodeId,
+    host_id: Option<NodeId>,
     client_id: Option<NodeId>,
 }
 
 impl HostClientKeyexpr {
     /// Create a new HostClientKeyexpr
-    pub fn new(prefix: &KeyExpr, host_id: NodeId, client_id: Option<NodeId>) -> Self {
+    pub fn new(prefix: &KeyExpr, host_id: Option<NodeId>, client_id: Option<NodeId>) -> Self {
         Self { 
             prefix: prefix.to_string(), 
             host_id,
@@ -100,8 +101,8 @@ impl HostClientKeyexpr {
         }
     }
 
-    /// Get the host ID
-    pub fn host_id(&self) -> &NodeId {
+    /// Get the host ID (None means wildcard)
+    pub fn host_id(&self) -> &Option<NodeId> {
         &self.host_id
     }
 
@@ -122,7 +123,7 @@ impl TryFrom<KeyExpr<'_>> for HostClientKeyexpr {
     fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
         let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
         
-        // Expected pattern: [...prefix]/host/<host_id>/<client_id_or_wildcard>
+        // Expected pattern: [...prefix]/host/<host_id_or_wildcard>/<client_id_or_wildcard>
         if parts.len() < 3 || parts[parts.len() - 3] != "host" {
             return Err(ArenaError::InvalidKeyexpr(
                 format!("Invalid HostClientKeyexpr pattern: {}", keyexpr.as_str()),
@@ -132,7 +133,11 @@ impl TryFrom<KeyExpr<'_>> for HostClientKeyexpr {
         let host_id_str = parts[parts.len() - 2];
         let client_id_str = parts[parts.len() - 1];
         
-        let host_id = NodeId::from_name(host_id_str.to_string())?;
+        let host_id = if host_id_str == "*" {
+            None
+        } else {
+            Some(NodeId::from_name(host_id_str.to_string())?)
+        };
         let client_id = if client_id_str == "*" {
             None
         } else {
@@ -146,10 +151,15 @@ impl TryFrom<KeyExpr<'_>> for HostClientKeyexpr {
 
 impl From<HostClientKeyexpr> for KeyExpr<'static> {
     fn from(client_keyexpr: HostClientKeyexpr) -> Self {
-        let keyexpr_str = match client_keyexpr.client_id {
-            Some(client_id) => format!("{}/host/{}/{}", client_keyexpr.prefix, client_keyexpr.host_id.as_str(), client_id.as_str()),
-            None => format!("{}/host/{}/*", client_keyexpr.prefix, client_keyexpr.host_id.as_str()),
+        let host_str = match &client_keyexpr.host_id {
+            Some(host_id) => host_id.as_str().to_string(),
+            None => "*".to_string(),
         };
+        let client_str = match &client_keyexpr.client_id {
+            Some(client_id) => client_id.as_str().to_string(),
+            None => "*".to_string(),
+        };
+        let keyexpr_str = format!("{}/host/{}/{}", client_keyexpr.prefix, host_str, client_str);
         KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
     }
 }
@@ -213,8 +223,8 @@ mod tests {
         let host_id = NodeId::from_name("host1".to_string()).unwrap();
         let client_id = NodeId::from_name("client1".to_string()).unwrap();
         
-        let client_keyexpr = HostClientKeyexpr::new(&prefix, host_id.clone(), Some(client_id.clone()));
-        assert_eq!(client_keyexpr.host_id(), &host_id);
+        let client_keyexpr = HostClientKeyexpr::new(&prefix, Some(host_id.clone()), Some(client_id.clone()));
+        assert_eq!(client_keyexpr.host_id(), &Some(host_id));
         assert_eq!(client_keyexpr.client_id(), &Some(client_id));
         assert_eq!(client_keyexpr.prefix(), "arena/game1");
     }
@@ -225,40 +235,92 @@ mod tests {
         let host_id = NodeId::from_name("host1".to_string()).unwrap();
         let client_id = NodeId::from_name("client1".to_string()).unwrap();
         
-        let client_keyexpr = HostClientKeyexpr::new(&prefix, host_id.clone(), Some(client_id.clone()));
+        let client_keyexpr = HostClientKeyexpr::new(&prefix, Some(host_id.clone()), Some(client_id.clone()));
         let keyexpr: KeyExpr = client_keyexpr.into();
         
         assert_eq!(keyexpr.as_str(), "arena/game1/host/host1/client1");
         
         let parsed = HostClientKeyexpr::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.host_id(), &host_id);
+        assert_eq!(parsed.host_id(), &Some(host_id));
         assert_eq!(parsed.client_id(), &Some(client_id));
         assert_eq!(parsed.prefix(), "arena/game1");
     }
 
     #[test]
-    fn test_host_client_keyexpr_wildcard_creation() {
+    fn test_host_client_keyexpr_wildcard_client_creation() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
         let host_id = NodeId::from_name("host1".to_string()).unwrap();
         
-        let client_keyexpr = HostClientKeyexpr::new(&prefix, host_id.clone(), None);
-        assert_eq!(client_keyexpr.host_id(), &host_id);
+        let client_keyexpr = HostClientKeyexpr::new(&prefix, Some(host_id.clone()), None);
+        assert_eq!(client_keyexpr.host_id(), &Some(host_id));
         assert_eq!(client_keyexpr.client_id(), &None);
         assert_eq!(client_keyexpr.prefix(), "arena/game1");
     }
 
     #[test]
-    fn test_host_client_keyexpr_wildcard_roundtrip() {
+    fn test_host_client_keyexpr_wildcard_client_roundtrip() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
         let host_id = NodeId::from_name("host1".to_string()).unwrap();
         
-        let client_keyexpr = HostClientKeyexpr::new(&prefix, host_id.clone(), None);
+        let client_keyexpr = HostClientKeyexpr::new(&prefix, Some(host_id.clone()), None);
         let keyexpr: KeyExpr = client_keyexpr.into();
         
         assert_eq!(keyexpr.as_str(), "arena/game1/host/host1/*");
         
         let parsed = HostClientKeyexpr::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.host_id(), &host_id);
+        assert_eq!(parsed.host_id(), &Some(host_id));
+        assert_eq!(parsed.client_id(), &None);
+        assert_eq!(parsed.prefix(), "arena/game1");
+    }
+
+    #[test]
+    fn test_host_client_keyexpr_wildcard_host_creation() {
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        let client_id = NodeId::from_name("client1".to_string()).unwrap();
+        
+        let client_keyexpr = HostClientKeyexpr::new(&prefix, None, Some(client_id.clone()));
+        assert_eq!(client_keyexpr.host_id(), &None);
+        assert_eq!(client_keyexpr.client_id(), &Some(client_id));
+        assert_eq!(client_keyexpr.prefix(), "arena/game1");
+    }
+
+    #[test]
+    fn test_host_client_keyexpr_wildcard_host_roundtrip() {
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        let client_id = NodeId::from_name("client1".to_string()).unwrap();
+        
+        let client_keyexpr = HostClientKeyexpr::new(&prefix, None, Some(client_id.clone()));
+        let keyexpr: KeyExpr = client_keyexpr.into();
+        
+        assert_eq!(keyexpr.as_str(), "arena/game1/host/*/client1");
+        
+        let parsed = HostClientKeyexpr::try_from(keyexpr).unwrap();
+        assert_eq!(parsed.host_id(), &None);
+        assert_eq!(parsed.client_id(), &Some(client_id));
+        assert_eq!(parsed.prefix(), "arena/game1");
+    }
+
+    #[test]
+    fn test_host_client_keyexpr_wildcard_both_creation() {
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        
+        let client_keyexpr = HostClientKeyexpr::new(&prefix, None, None);
+        assert_eq!(client_keyexpr.host_id(), &None);
+        assert_eq!(client_keyexpr.client_id(), &None);
+        assert_eq!(client_keyexpr.prefix(), "arena/game1");
+    }
+
+    #[test]
+    fn test_host_client_keyexpr_wildcard_both_roundtrip() {
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        
+        let client_keyexpr = HostClientKeyexpr::new(&prefix, None, None);
+        let keyexpr: KeyExpr = client_keyexpr.into();
+        
+        assert_eq!(keyexpr.as_str(), "arena/game1/host/*/*");
+        
+        let parsed = HostClientKeyexpr::try_from(keyexpr).unwrap();
+        assert_eq!(parsed.host_id(), &None);
         assert_eq!(parsed.client_id(), &None);
         assert_eq!(parsed.prefix(), "arena/game1");
     }
