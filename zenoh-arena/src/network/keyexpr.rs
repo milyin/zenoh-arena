@@ -4,189 +4,101 @@ use crate::error::ArenaError;
 use crate::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
-/// Generic NodeId-based keyexpr - represents a node or all nodes with a specific nodeid_prefix
-///
-/// Pattern: `<prefix>/<nodeid_prefix>/<node_id>` (when node_id is Some)
-/// Pattern: `<prefix>/<nodeid_prefix>/*` (when node_id is None)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeIdKeyexpr {
-    prefix: KeyExpr<'static>,
-    nodeid_prefix: KeyExpr<'static>,
-    node_id: Option<NodeId>,
+/// Role type for keyexpr
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// Node role - `<prefix>/node/<own_id>`
+    Node,
+    /// Host role - `<prefix>/host/<own_id>`
+    Host,
+    /// Client role - `<prefix>/client/<own_id>`
+    Client,
+    /// Link role - `<prefix>/link/<own_id>/<remote_id>`
+    Link,
 }
 
-impl NodeIdKeyexpr {
-    /// Create a new NodeIdKeyexpr with a given nodeid_prefix
-    pub fn new<P: Into<KeyExpr<'static>>, NP: Into<KeyExpr<'static>>>(
-        prefix: P,
-        nodeid_prefix: NP,
-        node_id: Option<NodeId>,
-    ) -> Self {
-        Self {
-            prefix: prefix.into(),
-            nodeid_prefix: nodeid_prefix.into(),
-            node_id,
+impl Role {
+    /// Get the string representation of the role
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Role::Node => "node",
+            Role::Host => "host",
+            Role::Client => "client",
+            Role::Link => "link",
         }
     }
 
-    /// Get the node ID (None means wildcard)
-    pub fn node_id(&self) -> &Option<NodeId> {
-        &self.node_id
-    }
-
-    /// Get the prefix as KeyExpr
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        &self.prefix
-    }
-
-    /// Get the nodeid_prefix as KeyExpr
-    pub fn nodeid_prefix(&self) -> &KeyExpr<'static> {
-        &self.nodeid_prefix
-    }
-}
-
-impl TryFrom<KeyExpr<'_>> for NodeIdKeyexpr {
-    type Error = ArenaError;
-
-    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-        let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
-
-        // Expected pattern: [...prefix]/<nodeid_prefix>/<node_id_or_wildcard>
-        if parts.len() < 2 {
-            return Err(ArenaError::InvalidKeyexpr(format!(
-                "Invalid NodeIdKeyexpr pattern: {}",
-                keyexpr.as_str()
-            )));
-        }
-
-        let nodeid_prefix_str = parts[parts.len() - 2];
-        let nodeid_prefix = KeyExpr::try_from(nodeid_prefix_str)?.into_owned();
-        let node_id_str = parts[parts.len() - 1];
-        let node_id = if node_id_str == "*" {
-            None
-        } else {
-            Some(NodeId::from_name(node_id_str.to_string())?)
-        };
-        let prefix_str = parts[..parts.len() - 2].join("/");
-        let prefix = KeyExpr::try_from(prefix_str)?.into_owned();
-
-        Ok(Self {
-            prefix,
-            nodeid_prefix,
-            node_id,
-        })
-    }
-}
-
-impl From<NodeIdKeyexpr> for KeyExpr<'static> {
-    fn from(node_id_keyexpr: NodeIdKeyexpr) -> Self {
-        let keyexpr_str = match node_id_keyexpr.node_id {
-            Some(node_id) => format!(
-                "{}/{}/{}",
-                node_id_keyexpr.prefix.as_str(),
-                node_id_keyexpr.nodeid_prefix,
-                node_id.as_str()
-            ),
-            None => format!(
-                "{}/{}/*",
-                node_id_keyexpr.prefix.as_str(),
-                node_id_keyexpr.nodeid_prefix
-            ),
-        };
-        KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
-    }
-}
-
-/// Host keyexpr - represents a specific host or all hosts in the arena
-///
-/// Pattern: `<prefix>/host/<host_id>` (when host_id is Some)
-/// Pattern: `<prefix>/host/*` (when host_id is None)
-///
-/// Used for:
-/// - Declaring queryables to respond to connection requests
-/// - Connecting to a specific host
-/// - Discovering all available hosts (when host_id is None)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HostKeyexpr {
-    inner: NodeIdKeyexpr,
-}
-
-impl HostKeyexpr {
-    /// Create a new HostKeyexpr
-    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, host_id: Option<NodeId>) -> Self {
-        let host_keyexpr = KeyExpr::try_from("host").unwrap();
-        Self {
-            inner: NodeIdKeyexpr::new(prefix, host_keyexpr, host_id),
+    /// Parse a role from a string
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "node" => Some(Role::Node),
+            "host" => Some(Role::Host),
+            "client" => Some(Role::Client),
+            "link" => Some(Role::Link),
+            _ => None,
         }
     }
 
-    /// Get the host ID (None means wildcard)
-    pub fn host_id(&self) -> &Option<NodeId> {
-        self.inner.node_id()
-    }
-
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.inner.prefix()
+    /// Whether this role can have remote_id (only Link does)
+    pub fn has_remote_id(&self) -> bool {
+        matches!(self, Role::Link)
     }
 }
 
-impl TryFrom<KeyExpr<'_>> for HostKeyexpr {
-    type Error = ArenaError;
-
-    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-        let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
-
-        // Expected pattern: [...prefix]/host/<host_id_or_wildcard>
-        if parts.len() < 2 || parts[parts.len() - 2] != "host" {
-            return Err(ArenaError::InvalidKeyexpr(format!(
-                "Invalid HostKeyexpr pattern: {}",
-                keyexpr.as_str()
-            )));
-        }
-
-        let inner = NodeIdKeyexpr::try_from(keyexpr)?;
-        Ok(Self { inner })
-    }
-}
-
-impl From<HostKeyexpr> for KeyExpr<'static> {
-    fn from(host_keyexpr: HostKeyexpr) -> Self {
-        KeyExpr::from(host_keyexpr.inner)
-    }
-}
-
-/// Node keyexpr - represents a specific node or all nodes in the arena
+/// Unified keyexpr for nodes, hosts, clients, and links
 ///
-/// Pattern: `<prefix>/node/<node_id>` (when node_id is Some)
-/// Pattern: `<prefix>/node/*` (when node_id is None)
-///
-/// Used for:
-/// - Declaring queryables for node-related operations
-/// - Connecting to a specific node
-/// - Discovering all available nodes (when node_id is None)
+/// Pattern: `<prefix>/<role>/<own_id>` (for Node, Host, Client with specific IDs)
+/// Pattern: `<prefix>/<role>/*` (for Node, Host, Client with wildcards)
+/// Pattern: `<prefix>/link/<own_id>/<remote_id>` (for Link with specific IDs)
+/// Pattern: `<prefix>/link/<own_id>/*` (for Link with wildcard remote_id)
+/// Pattern: `<prefix>/link/*/<remote_id>` (for Link with wildcard own_id)
+/// Pattern: `<prefix>/link/*/*` (for Link with both wildcards)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeKeyexpr {
-    inner: NodeIdKeyexpr,
+    prefix: KeyExpr<'static>,
+    role: Role,
+    own_id: Option<NodeId>,
+    remote_id: Option<NodeId>,
 }
 
 impl NodeKeyexpr {
     /// Create a new NodeKeyexpr
-    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, node_id: Option<NodeId>) -> Self {
-        let node_keyexpr = KeyExpr::try_from("node").unwrap();
-        Self {
-            inner: NodeIdKeyexpr::new(prefix, node_keyexpr, node_id),
+    pub fn new<P: Into<KeyExpr<'static>>>(
+        prefix: P,
+        role: Role,
+        own_id: Option<NodeId>,
+        remote_id: Option<NodeId>,
+    ) -> Self {
+        // Validate: remote_id is only for Link role
+        if !role.has_remote_id() && remote_id.is_some() {
+            panic!("remote_id can only be used with Link role");
         }
-    }
-
-    /// Get the node ID (None means wildcard)
-    pub fn node_id(&self) -> &Option<NodeId> {
-        self.inner.node_id()
+        Self {
+            prefix: prefix.into(),
+            role,
+            own_id,
+            remote_id,
+        }
     }
 
     /// Get the prefix
     pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.inner.prefix()
+        &self.prefix
+    }
+
+    /// Get the role
+    pub fn role(&self) -> Role {
+        self.role
+    }
+
+    /// Get the own ID (None means wildcard)
+    pub fn own_id(&self) -> &Option<NodeId> {
+        &self.own_id
+    }
+
+    /// Get the remote ID (only for Link role, None means wildcard)
+    pub fn remote_id(&self) -> &Option<NodeId> {
+        &self.remote_id
     }
 }
 
@@ -196,40 +108,234 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
     fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
         let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
 
-        // Expected pattern: [...prefix]/node/<node_id_or_wildcard>
-        if parts.len() < 2 || parts[parts.len() - 2] != "node" {
+        // Expected pattern: [...prefix]/<role>/<own_id>[/<remote_id>]
+        // At minimum: prefix, role, own_id (3 parts total if we count parts as separate)
+        // For "arena/game1/host/host1" we have parts: ["arena", "game1", "host", "host1"]
+        if parts.len() < 3 {
             return Err(ArenaError::InvalidKeyexpr(format!(
                 "Invalid NodeKeyexpr pattern: {}",
                 keyexpr.as_str()
             )));
         }
 
-        let inner = NodeIdKeyexpr::try_from(keyexpr)?;
-        Ok(Self { inner })
+        // Try to determine the role by looking backwards
+        // For Link: [...prefix]/link/<own_id>/<remote_id> - at least 4 parts
+        // For others: [...prefix]/<role>/<own_id> - at least 3 parts
+        
+        // First, try to interpret as Link (4 parts minimum)
+        if parts.len() >= 4 {
+            let possible_role_str = parts[parts.len() - 3];
+            if let Some(role) = Role::from_str(possible_role_str) {
+                if role.has_remote_id() {
+                    // This is a Link with 4+ parts: [...prefix]/link/<own_id>/<remote_id>
+                    let own_id_str = parts[parts.len() - 2];
+                    let remote_id_str = parts[parts.len() - 1];
+
+                    let own_id = if own_id_str == "*" {
+                        None
+                    } else {
+                        Some(NodeId::from_name(own_id_str.to_string())?)
+                    };
+                    let remote_id = if remote_id_str == "*" {
+                        None
+                    } else {
+                        Some(NodeId::from_name(remote_id_str.to_string())?)
+                    };
+
+                    let prefix_str = parts[..parts.len() - 3].join("/");
+                    let prefix = KeyExpr::try_from(prefix_str)?.into_owned();
+
+                    return Ok(Self {
+                        prefix,
+                        role,
+                        own_id,
+                        remote_id,
+                    });
+                }
+            }
+        }
+
+        // Otherwise, interpret as 3-part pattern: [...prefix]/<role>/<own_id>
+        let role_str = parts[parts.len() - 2];
+        let role = Role::from_str(role_str).ok_or_else(|| {
+            ArenaError::InvalidKeyexpr(format!(
+                "Invalid role '{}' in keyexpr: {}",
+                role_str,
+                keyexpr.as_str()
+            ))
+        })?;
+
+        if role.has_remote_id() {
+            return Err(ArenaError::InvalidKeyexpr(format!(
+                "Link role requires remote_id in keyexpr: {}",
+                keyexpr.as_str()
+            )));
+        }
+
+        let own_id_str = parts[parts.len() - 1];
+        let own_id = if own_id_str == "*" {
+            None
+        } else {
+            Some(NodeId::from_name(own_id_str.to_string())?)
+        };
+
+        let prefix_str = parts[..parts.len() - 2].join("/");
+        let prefix = KeyExpr::try_from(prefix_str)?.into_owned();
+
+        Ok(Self {
+            prefix,
+            role,
+            own_id,
+            remote_id: None,
+        })
     }
 }
 
 impl From<NodeKeyexpr> for KeyExpr<'static> {
-    fn from(node_keyexpr: NodeKeyexpr) -> Self {
-        KeyExpr::from(node_keyexpr.inner)
+    fn from(keyexpr: NodeKeyexpr) -> Self {
+        let keyexpr_str = if keyexpr.role.has_remote_id() {
+            // Link role: <prefix>/link/<own_id>/<remote_id>
+            let own_id_str = match &keyexpr.own_id {
+                Some(id) => id.as_str().to_string(),
+                None => "*".to_string(),
+            };
+            let remote_id_str = match &keyexpr.remote_id {
+                Some(id) => id.as_str().to_string(),
+                None => "*".to_string(),
+            };
+            format!(
+                "{}/{}/{}/{}",
+                keyexpr.prefix.as_str(),
+                keyexpr.role.as_str(),
+                own_id_str,
+                remote_id_str
+            )
+        } else {
+            // Other roles: <prefix>/<role>/<own_id>
+            let own_id_str = match &keyexpr.own_id {
+                Some(id) => id.as_str().to_string(),
+                None => "*".to_string(),
+            };
+            format!(
+                "{}/{}/{}",
+                keyexpr.prefix.as_str(),
+                keyexpr.role.as_str(),
+                own_id_str
+            )
+        };
+        KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
+    }
+}
+
+/// Host keyexpr - wrapper for NodeKeyexpr with Host role
+///
+/// Pattern: `<prefix>/host/<host_id>` (when host_id is Some)
+/// Pattern: `<prefix>/host/*` (when host_id is None)
+///
+/// Used for:
+/// - Declaring queryables to respond to connection requests
+/// - Connecting to a specific host
+/// - Discovering all available hosts (when host_id is None)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostKeyexpr(NodeKeyexpr);
+
+impl HostKeyexpr {
+    /// Create a new HostKeyexpr
+    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, host_id: Option<NodeId>) -> Self {
+        Self(NodeKeyexpr::new(prefix, Role::Host, host_id, None))
+    }
+
+    /// Get the host ID (None means wildcard)
+    pub fn host_id(&self) -> &Option<NodeId> {
+        self.0.own_id()
+    }
+
+    /// Get the prefix
+    pub fn prefix(&self) -> &KeyExpr<'static> {
+        self.0.prefix()
+    }
+}
+
+impl TryFrom<KeyExpr<'_>> for HostKeyexpr {
+    type Error = ArenaError;
+
+    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
+        let node_keyexpr = NodeKeyexpr::try_from(keyexpr)?;
+        if node_keyexpr.role() != Role::Host {
+            return Err(ArenaError::InvalidKeyexpr(
+                "Expected Host role in keyexpr".to_string(),
+            ));
+        }
+        Ok(Self(node_keyexpr))
+    }
+}
+
+impl From<HostKeyexpr> for KeyExpr<'static> {
+    fn from(host_keyexpr: HostKeyexpr) -> Self {
+        KeyExpr::from(host_keyexpr.0)
+    }
+}
+
+/// Node keyexpr - wrapper for NodeKeyexpr with Node role
+///
+/// Pattern: `<prefix>/node/<node_id>` (when node_id is Some)
+/// Pattern: `<prefix>/node/*` (when node_id is None)
+///
+/// Used for:
+/// - Declaring queryables for node-related operations
+/// - Connecting to a specific node
+/// - Discovering all available nodes (when node_id is None)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeKeyexprWrapper(NodeKeyexpr);
+
+impl NodeKeyexprWrapper {
+    /// Create a new NodeKeyexprWrapper
+    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, node_id: Option<NodeId>) -> Self {
+        Self(NodeKeyexpr::new(prefix, Role::Node, node_id, None))
+    }
+
+    /// Get the node ID (None means wildcard)
+    pub fn node_id(&self) -> &Option<NodeId> {
+        self.0.own_id()
+    }
+
+    /// Get the prefix
+    pub fn prefix(&self) -> &KeyExpr<'static> {
+        self.0.prefix()
+    }
+}
+
+impl TryFrom<KeyExpr<'_>> for NodeKeyexprWrapper {
+    type Error = ArenaError;
+
+    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
+        let node_keyexpr = NodeKeyexpr::try_from(keyexpr)?;
+        if node_keyexpr.role() != Role::Node {
+            return Err(ArenaError::InvalidKeyexpr(
+                "Expected Node role in keyexpr".to_string(),
+            ));
+        }
+        Ok(Self(node_keyexpr))
+    }
+}
+
+impl From<NodeKeyexprWrapper> for KeyExpr<'static> {
+    fn from(node_keyexpr: NodeKeyexprWrapper) -> Self {
+        KeyExpr::from(node_keyexpr.0)
     }
 }
 
 /// Host client keyexpr - used for initiating client connections or discovering clients
 ///
-/// Pattern: `<prefix>/host/<host_id>/<client_id>` (when both are Some)
-/// Pattern: `<prefix>/host/<host_id>/*` (when client_id is None)
-/// Pattern: `<prefix>/host/*/<client_id>` (when host_id is None)
-/// Pattern: `<prefix>/host/*/*` (when both are None)
+/// Pattern: `<prefix>/link/<host_id>/<client_id>` (when both are Some)
+/// Pattern: `<prefix>/link/<host_id>/*` (when client_id is None)
+/// Pattern: `<prefix>/link/*/<client_id>` (when host_id is None)
+/// Pattern: `<prefix>/link/*/*` (when both are None)
 ///
 /// Used when a client initiates a connection request to a specific host.
 /// Supports glob patterns for flexible matching on host_id and/or client_id.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HostClientKeyexpr {
-    prefix: KeyExpr<'static>,
-    host_id: Option<NodeId>,
-    client_id: Option<NodeId>,
-}
+pub struct HostClientKeyexpr(NodeKeyexpr);
 
 impl HostClientKeyexpr {
     /// Create a new HostClientKeyexpr
@@ -238,26 +344,22 @@ impl HostClientKeyexpr {
         host_id: Option<NodeId>,
         client_id: Option<NodeId>,
     ) -> Self {
-        Self {
-            prefix: prefix.into(),
-            host_id,
-            client_id,
-        }
+        Self(NodeKeyexpr::new(prefix, Role::Link, host_id, client_id))
     }
 
     /// Get the host ID (None means wildcard)
     pub fn host_id(&self) -> &Option<NodeId> {
-        &self.host_id
+        self.0.own_id()
     }
 
     /// Get the client ID (None means wildcard)
     pub fn client_id(&self) -> &Option<NodeId> {
-        &self.client_id
+        self.0.remote_id()
     }
 
     /// Get the prefix
     pub fn prefix(&self) -> &str {
-        &self.prefix
+        self.0.prefix().as_str()
     }
 }
 
@@ -265,52 +367,19 @@ impl TryFrom<KeyExpr<'_>> for HostClientKeyexpr {
     type Error = ArenaError;
 
     fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-        let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
-
-        // Expected pattern: [...prefix]/host/<host_id_or_wildcard>/<client_id_or_wildcard>
-        if parts.len() < 3 || parts[parts.len() - 3] != "host" {
-            return Err(ArenaError::InvalidKeyexpr(format!(
-                "Invalid HostClientKeyexpr pattern: {}",
-                keyexpr.as_str()
-            )));
+        let node_keyexpr = NodeKeyexpr::try_from(keyexpr)?;
+        if node_keyexpr.role() != Role::Link {
+            return Err(ArenaError::InvalidKeyexpr(
+                "Expected Link role in keyexpr".to_string(),
+            ));
         }
-
-        let host_id_str = parts[parts.len() - 2];
-        let client_id_str = parts[parts.len() - 1];
-
-        let host_id = if host_id_str == "*" {
-            None
-        } else {
-            Some(NodeId::from_name(host_id_str.to_string())?)
-        };
-        let client_id = if client_id_str == "*" {
-            None
-        } else {
-            Some(NodeId::from_name(client_id_str.to_string())?)
-        };
-        let prefix = parts[..parts.len() - 3].join("/");
-        let prefix = KeyExpr::try_from(prefix).unwrap().into_owned();
-
-        Ok(Self {
-            prefix,
-            host_id,
-            client_id,
-        })
+        Ok(Self(node_keyexpr))
     }
 }
 
 impl From<HostClientKeyexpr> for KeyExpr<'static> {
     fn from(client_keyexpr: HostClientKeyexpr) -> Self {
-        let host_str = match &client_keyexpr.host_id {
-            Some(host_id) => host_id.as_str().to_string(),
-            None => "*".to_string(),
-        };
-        let client_str = match &client_keyexpr.client_id {
-            Some(client_id) => client_id.as_str().to_string(),
-            None => "*".to_string(),
-        };
-        let keyexpr_str = format!("{}/host/{}/{}", client_keyexpr.prefix, host_str, client_str);
-        KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
+        KeyExpr::from(client_keyexpr.0)
     }
 }
 
@@ -389,7 +458,7 @@ mod tests {
             HostClientKeyexpr::new(prefix, Some(host_id.clone()), Some(client_id.clone()));
         let keyexpr: KeyExpr = client_keyexpr.into();
 
-        assert_eq!(keyexpr.as_str(), "arena/game1/host/host1/client1");
+        assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/client1");
 
         let parsed = HostClientKeyexpr::try_from(keyexpr).unwrap();
         assert_eq!(parsed.host_id(), &Some(host_id));
@@ -416,7 +485,7 @@ mod tests {
         let client_keyexpr = HostClientKeyexpr::new(prefix, Some(host_id.clone()), None);
         let keyexpr: KeyExpr = client_keyexpr.into();
 
-        assert_eq!(keyexpr.as_str(), "arena/game1/host/host1/*");
+        assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/*");
 
         let parsed = HostClientKeyexpr::try_from(keyexpr).unwrap();
         assert_eq!(parsed.host_id(), &Some(host_id));
@@ -443,7 +512,7 @@ mod tests {
         let client_keyexpr = HostClientKeyexpr::new(prefix, None, Some(client_id.clone()));
         let keyexpr: KeyExpr = client_keyexpr.into();
 
-        assert_eq!(keyexpr.as_str(), "arena/game1/host/*/client1");
+        assert_eq!(keyexpr.as_str(), "arena/game1/link/*/client1");
 
         let parsed = HostClientKeyexpr::try_from(keyexpr).unwrap();
         assert_eq!(parsed.host_id(), &None);
@@ -468,7 +537,7 @@ mod tests {
         let client_keyexpr = HostClientKeyexpr::new(prefix, None, None);
         let keyexpr: KeyExpr = client_keyexpr.into();
 
-        assert_eq!(keyexpr.as_str(), "arena/game1/host/*/*");
+        assert_eq!(keyexpr.as_str(), "arena/game1/link/*/*");
 
         let parsed = HostClientKeyexpr::try_from(keyexpr).unwrap();
         assert_eq!(parsed.host_id(), &None);
