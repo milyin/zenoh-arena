@@ -164,21 +164,7 @@ where
     Client(crate::client_state::ClientState),
 
     /// Acting as host
-    Host {
-        /// List of connected client IDs
-        connected_clients: Vec<NodeId>,
-        /// Game engine (only present in Host mode)
-        #[allow(dead_code)]
-        engine: E,
-        /// Liveliness token for host discovery
-        #[allow(dead_code)]
-        liveliness_token: Option<NodeLivelinessToken>,
-        /// Queryable for host discovery
-        #[allow(dead_code)]
-        queryable: Option<Arc<HostQueryable>>,
-        /// Multinode liveliness watch to detect any client disconnect
-        client_liveliness_watch: NodeLivelinessWatch,
-    },
+    Host(crate::host_state::HostState<E>),
 }
 
 impl<E> std::fmt::Debug for NodeStateInternal<E>
@@ -193,12 +179,9 @@ where
                     .field("host_id", &client_state.host_id)
                     .finish()
             }
-            NodeStateInternal::Host {
-                connected_clients,
-                ..
-            } => f
+            NodeStateInternal::Host(host_state) => f
                 .debug_struct("Host")
-                .field("connected_clients", connected_clients)
+                .field("connected_clients", &host_state.connected_clients)
                 .field("pending_client_disconnects_count", &"<futures>")
                 .finish(),
         }
@@ -212,13 +195,13 @@ where
     /// Check if currently in host mode
     #[allow(dead_code)]
     pub fn is_host(&self) -> bool {
-        matches!(self, NodeStateInternal::Host { .. })
+        matches!(self, NodeStateInternal::Host(_))
     }
 
     /// Check if currently in client mode
     #[allow(dead_code)]
     pub fn is_client(&self) -> bool {
-        matches!(self, NodeStateInternal::Client { .. })
+        matches!(self, NodeStateInternal::Client(_))
     }
 
     /// Check if host mode and accepting clients
@@ -227,20 +210,15 @@ where
     #[allow(dead_code)]
     pub fn is_accepting_clients(&self) -> bool {
         match self {
-            NodeStateInternal::Host {
-                queryable,
-                connected_clients,
-                engine,
-                ..
-            } => {
+            NodeStateInternal::Host(host_state) => {
                 // Only accepting if queryable is present (advertised)
-                if queryable.is_none() {
+                if host_state.queryable.is_none() {
                     return false;
                 }
 
                 // Check if we have capacity
-                let max = engine.max_clients();
-                let current = connected_clients.len();
+                let max = host_state.engine.max_clients();
+                let current = host_state.connected_clients.len();
                 match max {
                     None => true, // Unlimited clients
                     Some(max_count) => current < max_count,
@@ -254,9 +232,7 @@ where
     #[allow(dead_code)]
     pub fn client_count(&self) -> Option<usize> {
         match self {
-            NodeStateInternal::Host {
-                connected_clients, ..
-            } => Some(connected_clients.len()),
+            NodeStateInternal::Host(host_state) => Some(host_state.connected_clients.len()),
             _ => None,
         }
     }
@@ -295,13 +271,13 @@ where
         // Create multinode liveliness watch for monitoring connected clients
         let client_liveliness_watch = NodeLivelinessWatch::new(node_id.clone());
 
-        *self = NodeStateInternal::Host {
+        *self = NodeStateInternal::Host(crate::host_state::HostState {
             connected_clients: Vec::new(),
             engine,
             liveliness_token: Some(token),
             queryable: Some(Arc::new(queryable)),
             client_liveliness_watch,
-        };
+        });
 
         Ok(())
     }
@@ -351,16 +327,11 @@ where
             NodeStateInternal::Client(client_state) => NodeState::Client {
                 host_id: client_state.host_id.clone(),
             },
-            NodeStateInternal::Host {
-                connected_clients,
-                engine,
-                queryable,
-                ..
-            } => {
+            NodeStateInternal::Host(host_state) => {
                 // Host is accepting if it has a queryable and has capacity
-                let is_accepting = queryable.is_some() && {
-                    let max = engine.max_clients();
-                    let current = connected_clients.len();
+                let is_accepting = host_state.queryable.is_some() && {
+                    let max = host_state.engine.max_clients();
+                    let current = host_state.connected_clients.len();
                     match max {
                         None => true, // Unlimited clients
                         Some(max_count) => current < max_count,
@@ -369,7 +340,7 @@ where
 
                 NodeState::Host {
                     is_accepting,
-                    connected_clients: connected_clients.clone(),
+                    connected_clients: host_state.connected_clients.clone(),
                 }
             }
         }

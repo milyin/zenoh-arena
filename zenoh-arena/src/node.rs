@@ -128,13 +128,12 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         }
 
         // Dispatch based on current state using state-specific run methods
-        match &mut self.state {
+        let next_result = match std::mem::replace(&mut self.state, NodeStateInternal::SearchingHost) {
             NodeStateInternal::SearchingHost => {
                 use crate::searching_host_state::SearchingHostState;
                 let searching_state = SearchingHostState;
                 searching_state
                     .run(
-                        &mut self.state,
                         &self.session,
                         &self.config,
                         &self.id,
@@ -144,37 +143,28 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     .await
             }
             NodeStateInternal::Client(client_state) => {
-                // Call run method on the client state
                 let result = client_state
                     .run::<E>(&self.config, &self.id, &self.command_rx)
                     .await?;
                 
-                // Construct the appropriate NodeStatus response
-                if let Some(status) = result {
-                    // Check if we should transition to a different state
-                    match status.state {
-                        crate::types::NodeState::SearchingHost => {
-                            self.state = NodeStateInternal::SearchingHost;
-                        }
-                        crate::types::NodeState::Client { .. } => {
-                            // Stay in Client state, client_state already updated in place
-                        }
-                        _ => {
-                            // This shouldn't happen from Client state
-                        }
-                    }
-                    Ok(Some(status))
-                } else {
-                    Ok(None)
-                }
+                // Return the result as-is since it's already in the right format
+                Ok(result)
             }
-            NodeStateInternal::Host { .. } => {
-                use crate::host_state::HostState;
-                let host_state = HostState;
+            NodeStateInternal::Host(host_state) => {
                 host_state
-                    .run(&mut self.state, &self.config, &self.id, &self.session, &self.command_rx)
+                    .run(&self.config, &self.id, &self.session, &self.command_rx)
                     .await
             }
+        };
+        
+        // Update state with the next state returned from run()
+        match next_result {
+            Ok(Some((status, next_state))) => {
+                self.state = next_state;
+                Ok(Some(status))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
         }
     }
 }

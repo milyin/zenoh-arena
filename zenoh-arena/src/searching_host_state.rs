@@ -11,17 +11,17 @@ pub(crate) struct SearchingHostState;
 impl SearchingHostState {
     /// Process the SearchingHost state - search for available hosts and attempt to connect
     ///
+    /// Consumes self and returns the status along with the next state.
     /// Uses HostQuerier to find and connect to available hosts. If timeout expires or
     /// no hosts are available/accept connection, transitions to Host state.
     pub(crate) async fn run<E>(
-        &self,
-        state: &mut NodeStateInternal<E>,
+        self,
         session: &zenoh::Session,
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
         get_engine: &dyn Fn() -> E,
-    ) -> Result<Option<NodeStatus<E::State>>>
+    ) -> Result<Option<(NodeStatus<E::State>, NodeStateInternal<E>)>>
     where
         E: crate::node::GameEngine,
     {
@@ -85,7 +85,9 @@ impl SearchingHostState {
 
         // Handle connection result - state transition after select!
         if let Some(host_id) = connected_host {
-            state
+            // Transition to Client state
+            let mut next_state = NodeStateInternal::SearchingHost;
+            next_state
                 .client(
                     session,
                     config.keyexpr_prefix.clone(),
@@ -93,12 +95,17 @@ impl SearchingHostState {
                     node_id.clone(),
                 )
                 .await?;
-            Ok(Some(NodeStatus {
-                state: NodeState::from(&*state),
-                game_state: None,
-            }))
+            Ok(Some((
+                NodeStatus {
+                    state: NodeState::from(&next_state),
+                    game_state: None,
+                },
+                next_state,
+            )))
         } else {
-            state
+            // Transition to Host state
+            let mut next_state = NodeStateInternal::SearchingHost;
+            next_state
                 .host(
                     get_engine(),
                     session,
@@ -106,10 +113,13 @@ impl SearchingHostState {
                     node_id,
                 )
                 .await?;
-            Ok(Some(NodeStatus {
-                state: NodeState::from(&*state),
-                game_state: None,
-            }))
+            Ok(Some((
+                NodeStatus {
+                    state: NodeState::from(&next_state),
+                    game_state: None,
+                },
+                next_state,
+            )))
         }
     }
 }
