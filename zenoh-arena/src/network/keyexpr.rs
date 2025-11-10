@@ -236,208 +236,161 @@ impl From<KeyexprTemplate> for KeyExpr<'static> {
     }
 }
 
-/// Wrapper for Node role keyexpr: `<prefix>/node/<node_id>`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyexprNode {
-    template: KeyexprTemplate,
-}
-
-impl KeyexprNode {
-    /// Create a new Node keyexpr
-    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, node_id: Option<NodeId>) -> Self {
-        Self {
-            template: KeyexprTemplate::new(prefix, Role::Node, node_id, None),
+/// Macro to define single-node keyexpr wrappers (Node, Host, Client)
+/// These wrappers use only node_a from the template
+macro_rules! define_single_node_keyexpr {
+    (
+        $(#[$meta:meta])*
+        $name:ident,
+        $role:ident,
+        $id_name:ident,
+        $doc_comment:expr
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct $name {
+            template: KeyexprTemplate,
         }
-    }
 
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.template.prefix()
-    }
+        impl $name {
+            #[doc = $doc_comment]
+            pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, $id_name: Option<NodeId>) -> Self {
+                Self {
+                    template: KeyexprTemplate::new(prefix, Role::$role, $id_name, None),
+                }
+            }
 
-    /// Get the node ID (None means wildcard)
-    pub fn node_id(&self) -> &Option<NodeId> {
-        self.template.node_a()
-    }
-}
+            /// Get the prefix
+            pub fn prefix(&self) -> &KeyExpr<'static> {
+                self.template.prefix()
+            }
 
-impl From<KeyexprNode> for KeyExpr<'static> {
-    fn from(keyexpr: KeyexprNode) -> Self {
-        keyexpr.template.into()
-    }
-}
-
-/// Wrapper for Host role keyexpr: `<prefix>/host/<host_id>`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyexprHost {
-    template: KeyexprTemplate,
-}
-
-impl KeyexprHost {
-    /// Create a new Host keyexpr
-    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, host_id: Option<NodeId>) -> Self {
-        Self {
-            template: KeyexprTemplate::new(prefix, Role::Host, host_id, None),
+            #[doc = concat!("Get the ", stringify!($id_name), " (None means wildcard)")]
+            pub fn $id_name(&self) -> &Option<NodeId> {
+                self.template.node_a()
+            }
         }
-    }
 
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.template.prefix()
-    }
-
-    /// Get the host ID (None means wildcard)
-    pub fn host_id(&self) -> &Option<NodeId> {
-        self.template.node_a()
-    }
-}
-
-impl From<KeyexprHost> for KeyExpr<'static> {
-    fn from(keyexpr: KeyexprHost) -> Self {
-        keyexpr.template.into()
-    }
-}
-
-/// Wrapper for Client role keyexpr: `<prefix>/client/<client_id>`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyexprClient {
-    template: KeyexprTemplate,
-}
-
-impl KeyexprClient {
-    /// Create a new Client keyexpr
-    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, client_id: Option<NodeId>) -> Self {
-        Self {
-            template: KeyexprTemplate::new(prefix, Role::Client, client_id, None),
+        impl From<$name> for KeyExpr<'static> {
+            fn from(keyexpr: $name) -> Self {
+                keyexpr.template.into()
+            }
         }
-    }
-
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.template.prefix()
-    }
-
-    /// Get the client ID (None means wildcard)
-    pub fn client_id(&self) -> &Option<NodeId> {
-        self.template.node_a()
-    }
+    };
 }
 
-impl From<KeyexprClient> for KeyExpr<'static> {
-    fn from(keyexpr: KeyexprClient) -> Self {
-        keyexpr.template.into()
-    }
-}
-
-/// Wrapper for Shake role keyexpr: `<prefix>/shake/<host_id>/<client_id>`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyexprShake {
-    template: KeyexprTemplate,
-}
-
-impl KeyexprShake {
-    /// Create a new Shake keyexpr for handshake
-    pub fn new<P: Into<KeyExpr<'static>>>(
-        prefix: P,
-        host_id: Option<NodeId>,
-        client_id: Option<NodeId>,
-    ) -> Self {
-        Self {
-            template: KeyexprTemplate::new(prefix, Role::Shake, host_id, client_id),
+/// Macro to define dual-node keyexpr wrappers (Shake, Link)
+/// These wrappers use both node_a and node_b from the template
+macro_rules! define_dual_node_keyexpr {
+    (
+        $(#[$meta:meta])*
+        $name:ident,
+        $role:ident,
+        $id_a_name:ident,
+        $id_b_name:ident,
+        $doc_comment:expr
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct $name {
+            template: KeyexprTemplate,
         }
-    }
 
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.template.prefix()
-    }
+        impl $name {
+            #[doc = $doc_comment]
+            pub fn new<P: Into<KeyExpr<'static>>>(
+                prefix: P,
+                $id_a_name: Option<NodeId>,
+                $id_b_name: Option<NodeId>,
+            ) -> Self {
+                Self {
+                    template: KeyexprTemplate::new(prefix, Role::$role, $id_a_name, $id_b_name),
+                }
+            }
 
-    /// Get the host ID (None means wildcard)
-    pub fn host_id(&self) -> &Option<NodeId> {
-        self.template.node_a()
-    }
+            /// Get the prefix
+            pub fn prefix(&self) -> &KeyExpr<'static> {
+                self.template.prefix()
+            }
 
-    /// Get the client ID (None means wildcard)
-    pub fn client_id(&self) -> &Option<NodeId> {
-        self.template.node_b()
-    }
-}
+            #[doc = concat!("Get the ", stringify!($id_a_name), " (None means wildcard)")]
+            pub fn $id_a_name(&self) -> &Option<NodeId> {
+                self.template.node_a()
+            }
 
-impl From<KeyexprShake> for KeyExpr<'static> {
-    fn from(keyexpr: KeyexprShake) -> Self {
-        keyexpr.template.into()
-    }
-}
-
-impl TryFrom<KeyExpr<'_>> for KeyexprShake {
-    type Error = ArenaError;
-
-    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-        let template = KeyexprTemplate::try_from(keyexpr)?;
-        if template.role() != Role::Shake {
-            return Err(ArenaError::InvalidKeyexpr(format!(
-                "Expected Shake role, found {:?}",
-                template.role()
-            )));
+            #[doc = concat!("Get the ", stringify!($id_b_name), " (None means wildcard)")]
+            pub fn $id_b_name(&self) -> &Option<NodeId> {
+                self.template.node_b()
+            }
         }
-        Ok(Self { template })
-    }
-}
 
-/// Wrapper for Link role keyexpr: `<prefix>/link/<sender_id>/<receiver_id>`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyexprLink {
-    template: KeyexprTemplate,
-}
-
-impl KeyexprLink {
-    /// Create a new Link keyexpr for data communication
-    pub fn new<P: Into<KeyExpr<'static>>>(
-        prefix: P,
-        sender_id: Option<NodeId>,
-        receiver_id: Option<NodeId>,
-    ) -> Self {
-        Self {
-            template: KeyexprTemplate::new(prefix, Role::Link, sender_id, receiver_id),
+        impl From<$name> for KeyExpr<'static> {
+            fn from(keyexpr: $name) -> Self {
+                keyexpr.template.into()
+            }
         }
-    }
 
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        self.template.prefix()
-    }
+        impl TryFrom<KeyExpr<'_>> for $name {
+            type Error = ArenaError;
 
-    /// Get the sender ID (None means wildcard)
-    pub fn sender_id(&self) -> &Option<NodeId> {
-        self.template.node_a()
-    }
-
-    /// Get the receiver ID (None means wildcard)
-    pub fn receiver_id(&self) -> &Option<NodeId> {
-        self.template.node_b()
-    }
-}
-
-impl From<KeyexprLink> for KeyExpr<'static> {
-    fn from(keyexpr: KeyexprLink) -> Self {
-        keyexpr.template.into()
-    }
-}
-
-impl TryFrom<KeyExpr<'_>> for KeyexprLink {
-    type Error = ArenaError;
-
-    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-        let template = KeyexprTemplate::try_from(keyexpr)?;
-        if template.role() != Role::Link {
-            return Err(ArenaError::InvalidKeyexpr(format!(
-                "Expected Link role, found {:?}",
-                template.role()
-            )));
+            fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
+                let template = KeyexprTemplate::try_from(keyexpr)?;
+                if template.role() != Role::$role {
+                    return Err(ArenaError::InvalidKeyexpr(format!(
+                        "Expected {} role, found {:?}",
+                        stringify!($role),
+                        template.role()
+                    )));
+                }
+                Ok(Self { template })
+            }
         }
-        Ok(Self { template })
-    }
+    };
 }
+
+// Define single-node keyexpr types
+define_single_node_keyexpr!(
+    /// Wrapper for Node role keyexpr: `<prefix>/node/<node_id>`
+    KeyexprNode,
+    Node,
+    node_id,
+    "Create a new Node keyexpr"
+);
+
+define_single_node_keyexpr!(
+    /// Wrapper for Host role keyexpr: `<prefix>/host/<host_id>`
+    KeyexprHost,
+    Host,
+    host_id,
+    "Create a new Host keyexpr"
+);
+
+define_single_node_keyexpr!(
+    /// Wrapper for Client role keyexpr: `<prefix>/client/<client_id>`
+    KeyexprClient,
+    Client,
+    client_id,
+    "Create a new Client keyexpr"
+);
+
+// Define dual-node keyexpr types
+define_dual_node_keyexpr!(
+    /// Wrapper for Shake role keyexpr: `<prefix>/shake/<host_id>/<client_id>`
+    KeyexprShake,
+    Shake,
+    host_id,
+    client_id,
+    "Create a new Shake keyexpr for handshake"
+);
+
+define_dual_node_keyexpr!(
+    /// Wrapper for Link role keyexpr: `<prefix>/link/<sender_id>/<receiver_id>`
+    KeyexprLink,
+    Link,
+    sender_id,
+    receiver_id,
+    "Create a new Link keyexpr for data communication"
+);
 
 #[cfg(test)]
 mod tests {
