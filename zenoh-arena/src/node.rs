@@ -43,8 +43,7 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
 
     /// Liveliness token for this node's identity (Role::Node)
     /// Kept throughout the node's lifetime to protect against other nodes with the same name
-    #[allow(dead_code)]
-    node_liveliness_token: NodeLivelinessToken,
+    _node_liveliness_token: NodeLivelinessToken,
 }
 
 impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
@@ -92,7 +91,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             get_engine,
             command_rx,
             command_tx,
-            node_liveliness_token,
+            _node_liveliness_token: node_liveliness_token,
         };
 
         Ok(node)
