@@ -13,7 +13,9 @@ pub enum Role {
     Host,
     /// Client role - `<prefix>/client/<own_id>`
     Client,
-    /// Link role - `<prefix>/link/<own_id>/<remote_id>`
+    /// Shake role - `<prefix>/shake/<own_id>/<remote_id>` (for handshake)
+    Shake,
+    /// Link role - `<prefix>/link/<own_id>/<remote_id>` (for data communication)
     Link,
 }
 
@@ -24,6 +26,7 @@ impl Role {
             Role::Node => "node",
             Role::Host => "host",
             Role::Client => "client",
+            Role::Shake => "shake",
             Role::Link => "link",
         }
     }
@@ -34,14 +37,15 @@ impl Role {
             "node" => Some(Role::Node),
             "host" => Some(Role::Host),
             "client" => Some(Role::Client),
+            "shake" => Some(Role::Shake),
             "link" => Some(Role::Link),
             _ => None,
         }
     }
 
-    /// Whether this role can have remote_id (only Link does)
+    /// Whether this role can have remote_id (only Shake and Link do)
     pub fn has_remote_id(&self) -> bool {
-        matches!(self, Role::Link)
+        matches!(self, Role::Shake | Role::Link)
     }
 }
 
@@ -49,6 +53,7 @@ impl Role {
 ///
 /// Pattern: `<prefix>/<role>/<own_id>` (for Node, Host, Client with specific IDs)
 /// Pattern: `<prefix>/<role>/*` (for Node, Host, Client with wildcards)
+/// Pattern: `<prefix>/shake/<own_id>/<remote_id>` (for Shake with specific IDs)
 /// Pattern: `<prefix>/link/<own_id>/<remote_id>` (for Link with specific IDs)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeKeyexpr {
@@ -66,9 +71,9 @@ impl NodeKeyexpr {
         own_id: Option<NodeId>,
         remote_id: Option<NodeId>,
     ) -> Self {
-        // Validate: remote_id is only for Link role
+        // Validate: remote_id is only for Shake and Link roles
         if !role.has_remote_id() && remote_id.is_some() {
-            panic!("remote_id can only be used with Link role");
+            panic!("remote_id can only be used with Shake or Link role");
         }
         Self {
             prefix: prefix.into(),
@@ -93,7 +98,7 @@ impl NodeKeyexpr {
         &self.own_id
     }
 
-    /// Get the remote ID (only for Link role, None means wildcard)
+    /// Get the remote ID (only for Shake and Link roles, None means wildcard)
     pub fn remote_id(&self) -> &Option<NodeId> {
         &self.remote_id
     }
@@ -116,15 +121,15 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
         }
 
         // Try to determine the role by looking backwards
-        // For Link: [...prefix]/link/<own_id>/<remote_id> - at least 4 parts
+        // For Shake/Link: [...prefix]/shake|link/<own_id>/<remote_id> - at least 4 parts
         // For others: [...prefix]/<role>/<own_id> - at least 3 parts
 
-        // First, try to interpret as Link (4 parts minimum)
+        // First, try to interpret as Shake/Link (4 parts minimum)
         if parts.len() >= 4 {
             let possible_role_str = parts[parts.len() - 3];
             if let Some(role) = Role::from_str(possible_role_str) {
                 if role.has_remote_id() {
-                    // This is a Link with 4+ parts: [...prefix]/link/<own_id>/<remote_id>
+                    // This is a Shake/Link with 4+ parts: [...prefix]/shake|link/<own_id>/<remote_id>
                     let own_id_str = parts[parts.len() - 2];
                     let remote_id_str = parts[parts.len() - 1];
 
@@ -164,7 +169,7 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
 
         if role.has_remote_id() {
             return Err(ArenaError::InvalidKeyexpr(format!(
-                "Link role requires remote_id in keyexpr: {}",
+                "Shake/Link role requires remote_id in keyexpr: {}",
                 keyexpr.as_str()
             )));
         }
@@ -191,7 +196,7 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
 impl From<NodeKeyexpr> for KeyExpr<'static> {
     fn from(keyexpr: NodeKeyexpr) -> Self {
         let keyexpr_str = if keyexpr.role.has_remote_id() {
-            // Link role: <prefix>/link/<own_id>/<remote_id>
+            // Shake/Link role: <prefix>/shake|link/<own_id>/<remote_id>
             let own_id_str = match &keyexpr.own_id {
                 Some(id) => id.as_str().to_string(),
                 None => "*".to_string(),

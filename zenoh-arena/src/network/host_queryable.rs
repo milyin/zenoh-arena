@@ -2,17 +2,17 @@
 //!
 //! ## Protocol Overview
 //!
-//! The host declares a SINGLE queryable on `<prefix>/host/<host_id>/*` pattern.
+//! The host declares a SINGLE queryable on `<prefix>/shake/<host_id>/*` pattern.
 //! This queryable responds to both:
 //!
 //! 1. **Discovery Phase**: Glob queries from clients
-//!    - Client query: `<prefix>/host/*/<client_id>` (glob host_id)
-//!    - Matches queryable pattern: `<prefix>/host/<host_id>/*`
+//!    - Client query: `<prefix>/shake/*/<client_id>` (glob host_id)
+//!    - Matches queryable pattern: `<prefix>/shake/<host_id>/*`
 //!    - Queryable callback replies with ok to confirm presence (discovery phase detected)
 //!
 //! 2. **Connection Phase**: Specific connection requests
-//!    - Client query: `<prefix>/host/<host_id>/<client_id>` (both specific)
-//!    - Matches same queryable pattern: `<prefix>/host/<host_id>/*`
+//!    - Client query: `<prefix>/shake/<host_id>/<client_id>` (both specific)
+//!    - Matches same queryable pattern: `<prefix>/shake/<host_id>/*`
 //!    - Queryable callback pushes NodeRequest to channel for host handler (connection phase detected)
 //!    - Host calls accept() or reject() on the request
 //!
@@ -43,13 +43,13 @@ impl HostRequest {
     ///
     /// # Panics
     ///
-    /// Panics if query keyexpr is not NodeKeyexpr with Link role, Some own_id, and matching remote_id.
+    /// Panics if query keyexpr is not NodeKeyexpr with Shake role, Some own_id, and matching remote_id.
     pub fn new(query: Query, client_id: NodeId) -> Self {
         let parsed = NodeKeyexpr::try_from(query.key_expr().clone()).expect("Invalid NodeKeyexpr");
         assert_eq!(
             parsed.role(),
-            Role::Link,
-            "Expected Link role in query keyexpr: {}",
+            Role::Shake,
+            "Expected Shake role in query keyexpr: {}",
             query.key_expr().as_str()
         );
         assert!(
@@ -111,10 +111,10 @@ impl HostRequest {
 
 /// Wrapper for host discovery and connection requests
 ///
-/// Holds a queryable declared on `<prefix>/host/<host_id>/*` to respond to:
-/// - Discovery queries: `<prefix>/host/*/<client_id>` (glob on host_id)
+/// Holds a queryable declared on `<prefix>/shake/<host_id>/*` to respond to:
+/// - Discovery queries: `<prefix>/shake/*/<client_id>` (glob on host_id)
 ///   → Replies immediately with ok (presence confirmation)
-/// - Connection queries: `<prefix>/host/<host_id>/<client_id>` (specific both)
+/// - Connection queries: `<prefix>/shake/<host_id>/<client_id>` (specific both)
 ///   → Returns NodeRequest for host to accept/reject
 #[derive(Debug)]
 pub struct HostQueryable {
@@ -129,16 +129,16 @@ pub struct HostQueryable {
 impl HostQueryable {
     /// Declare a new queryable for a host node
     ///
-    /// Declares queryable on `<prefix>/link/<host_id>/*` pattern.
+    /// Declares queryable on `<prefix>/shake/<host_id>/*` pattern.
     pub async fn declare(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: NodeId,
     ) -> Result<Self> {
         let prefix = prefix.into();
-        // Declare on pattern: <prefix>/link/<host_id>/*
+        // Declare on pattern: <prefix>/shake/<host_id>/*
         let host_client_keyexpr =
-            NodeKeyexpr::new(prefix.clone(), Role::Link, Some(node_id.clone()), None);
+            NodeKeyexpr::new(prefix.clone(), Role::Shake, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = host_client_keyexpr.into();
 
         // Declare queryable without callback
@@ -169,7 +169,7 @@ impl HostQueryable {
             // Parse the incoming query keyexpr to determine if it's discovery or connection
             let query_keyexpr = query.key_expr().clone();
 
-            // Try to parse as NodeKeyexpr with Link role to extract own_id and remote_id
+            // Try to parse as NodeKeyexpr with Shake role to extract own_id and remote_id
             match NodeKeyexpr::try_from(query_keyexpr.clone()) {
                 Ok(parsed) => {
                     match (parsed.own_id(), parsed.remote_id()) {
@@ -200,7 +200,7 @@ impl HostQueryable {
                             );
                             let reply_host_client = NodeKeyexpr::new(
                                 self.prefix.clone(),
-                                Role::Link,
+                                Role::Shake,
                                 Some(self.node_id.clone()),
                                 Some(remote_id.clone()),
                             );

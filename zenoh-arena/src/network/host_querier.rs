@@ -5,29 +5,29 @@
 //! The connection process consists of two phases:
 //!
 //! ### Phase 1: Host Discovery
-//! - Client sends query to `<prefix>/host/*/client_id` keyexpr (glob on host_id)
-//! - All active hosts respond via their single queryable on `<prefix>/host/<host_id>/*`
+//! - Client sends query to `<prefix>/shake/*/client_id` keyexpr (glob on host_id)
+//! - All active hosts respond via their single queryable on `<prefix>/shake/<host_id>/*`
 //! - This acts as a presence confirmation: "I am a host, here's my ID"
 //! - Client collects all available host IDs from responses
 //!
 //! ### Phase 2: Connection Attempt
-//! - For each discovered host, client sends query to `<prefix>/host/<host_id>/<client_id>` keyexpr
-//! - Host's same queryable on `<prefix>/host/<host_id>/*` responds to this specific keyexpr
+//! - For each discovered host, client sends query to `<prefix>/shake/<host_id>/<client_id>` keyexpr
+//! - Host's same queryable on `<prefix>/shake/<host_id>/*` responds to this specific keyexpr
 //! - This acts as a connection confirmation: "I accept your specific connection request"
 //! - If response is Ok, connection is established with that host
 //! - If no host responds positively, client returns None (will become host itself)
 //!
 //! ## Queryable Implementation (Future)
 //!
-//! Hosts will declare a SINGLE queryable on `<prefix>/host/<host_id>/*` that responds to:
+//! Hosts will declare a SINGLE queryable on `<prefix>/shake/<host_id>/*` that responds to:
 //!
-//! 1. **Glob queries**: `<prefix>/host/<host_id>/*`
-//!    - Matches incoming glob discovery queries: `<prefix>/host/<host_id>/<client_id>`
+//! 1. **Glob queries**: `<prefix>/shake/<host_id>/*`
+//!    - Matches incoming glob discovery queries: `<prefix>/shake/<host_id>/<client_id>`
 //!    - Keyexpr pattern: client_id is a wildcard
 //!    - Response: Confirms host presence (for discovery phase)
 //!
-//! 2. **Specific queries**: `<prefix>/host/<host_id>/<specific_client_id>`
-//!    - Matches incoming specific connection queries: `<prefix>/host/<host_id>/<specific_client_id>`
+//! 2. **Specific queries**: `<prefix>/shake/<host_id>/<specific_client_id>`
+//!    - Matches incoming specific connection queries: `<prefix>/shake/<host_id>/<specific_client_id>`
 //!    - Keyexpr pattern: client_id matches exactly
 //!    - Response: Confirms connection acceptance (for connection phase)
 //!
@@ -56,12 +56,12 @@ impl HostQuerier {
     /// Performs two-phase discovery and connection:
     ///
     /// **Phase 1: Host Discovery**
-    /// - Queries `<prefix>/host/*/<client_id>` (glob on host_id, specific client_id)
+    /// - Queries `<prefix>/shake/*/<client_id>` (glob on host_id, specific client_id)
     /// - All available hosts respond to this glob pattern
     /// - Collects all discovered host IDs
     ///
     /// **Phase 2: Connection Establishment**
-    /// - For each discovered host, queries `<prefix>/host/<host_id>/<client_id>`
+    /// - For each discovered host, queries `<prefix>/shake/<host_id>/<client_id>`
     /// - Host confirms it accepts this specific connection request
     /// - Returns the ID of the first host that accepts the connection
     ///
@@ -79,10 +79,10 @@ impl HostQuerier {
         let prefix = prefix.into();
 
         // Phase 1: Discover all available hosts
-        // Query: <prefix>/link/*/client_id (glob on own_id, specific remote_id)
+        // Query: <prefix>/shake/*/client_id (glob on own_id, specific remote_id)
         // This queries all hosts in the arena, asking them to confirm presence
         let discover_keyexpr =
-            NodeKeyexpr::new(prefix.clone(), Role::Link, None, Some(client_id.clone()));
+            NodeKeyexpr::new(prefix.clone(), Role::Shake, None, Some(client_id.clone()));
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
@@ -123,12 +123,12 @@ impl HostQuerier {
         );
 
         // Phase 2: Try connecting to each discovered host
-        // Query: <prefix>/link/<host_id>/<client_id> (specific own_id and remote_id)
+        // Query: <prefix>/shake/<host_id>/<client_id> (specific own_id and remote_id)
         // This requests the specific host to confirm it accepts this client's connection
         for host_id in host_ids {
             let connect_keyexpr = NodeKeyexpr::new(
                 prefix.clone(),
-                Role::Link,
+                Role::Shake,
                 Some(host_id.clone()),
                 Some(client_id.clone()),
             );
