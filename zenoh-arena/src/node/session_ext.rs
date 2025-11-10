@@ -1,11 +1,9 @@
-/// Extension trait for zenoh::Session to declare arena nodes
-use crate::config::NodeConfig;
-use crate::node::{GameEngine, Node};
-use crate::types::NodeId;
-use crate::Result;
-use zenoh::key_expr::KeyExpr;
-use zenoh::Resolvable;
+use zenoh::{Resolvable, key_expr::KeyExpr};
+use crate::error::Result;
 
+use crate::node::{config::NodeConfig, node::{GameEngine, Node}, types::NodeId};
+
+/// Extension trait for zenoh::Session to declare arena nodes
 /// Extension trait for zenoh::Session to add arena node declaration
 pub trait SessionExt {
     /// Declare an arena node

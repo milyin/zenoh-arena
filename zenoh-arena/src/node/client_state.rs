@@ -1,8 +1,9 @@
 /// Client state implementation
-use crate::config::NodeConfig;
+use crate::node::config::NodeConfig;
 use crate::error::Result;
 use crate::network::{NodeLivelinessToken, NodeLivelinessWatch};
-use crate::types::{NodeId, NodeStateInternal};
+use crate::node::node::{GameEngine, NodeCommand};
+use crate::node::types::{NodeId, NodeStateInternal};
 
 /// State while connected as a client to a host
 pub(crate) struct ClientState {
@@ -29,10 +30,10 @@ impl ClientState {
         mut self,
         config: &NodeConfig,
         node_id: &NodeId,
-        command_rx: &flume::Receiver<crate::node::NodeCommand<E::Action>>,
+        command_rx: &flume::Receiver<NodeCommand<E::Action>>,
     ) -> Result<NodeStateInternal<E>>
     where
-        E: crate::node::GameEngine,
+        E: GameEngine,
     {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
@@ -66,11 +67,11 @@ impl ClientState {
                         tracing::info!("Node '{}' command channel closed", node_id);
                         return Ok(NodeStateInternal::Stop);
                     }
-                    Ok(crate::node::NodeCommand::Stop) => {
+                    Ok(NodeCommand::Stop) => {
                         tracing::info!("Node '{}' received Stop command, exiting", node_id);
                         return Ok(NodeStateInternal::Stop);
                     }
-                    Ok(crate::node::NodeCommand::GameAction(_action)) => {
+                    Ok(NodeCommand::GameAction(_action)) => {
                         tracing::debug!(
                             "Node '{}' forwarding action to host '{}'",
                             node_id,

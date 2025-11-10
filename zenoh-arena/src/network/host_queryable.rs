@@ -24,7 +24,7 @@
 
 use crate::error::Result;
 use crate::network::keyexpr::{NodeKeyexpr, Role};
-use crate::types::NodeId;
+use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 use zenoh::query::{Query, Queryable};
 

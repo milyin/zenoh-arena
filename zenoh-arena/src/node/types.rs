@@ -1,10 +1,13 @@
 /// Core types for the zenoh-arena library
 use std::sync::Arc;
 use std::time::Instant;
-
-use crate::error::{ArenaError, Result};
-use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, Role};
 use zenoh::key_expr::KeyExpr;
+
+use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, Role};
+use crate::node::client_state::ClientState;
+use crate::error::{ArenaError, Result};
+use crate::node::host_state::HostState;
+use crate::node::node::GameEngine;
 
 /// Unique node identifier
 ///
@@ -140,7 +143,7 @@ impl<S> std::fmt::Display for NodeState<S> {
 #[derive(Default)]
 pub(crate) enum NodeStateInternal<E>
 where
-    E: crate::node::GameEngine,
+    E: GameEngine,
 {
     /// Searching for available hosts
     #[default]
@@ -148,10 +151,10 @@ where
 
     /// Connected as client to a host
     #[allow(dead_code)]
-    Client(crate::client_state::ClientState),
+    Client(ClientState),
 
     /// Acting as host
-    Host(crate::host_state::HostState<E>),
+    Host(HostState<E>),
 
     /// Node has stopped
     Stop,
@@ -159,7 +162,7 @@ where
 
 impl<E> std::fmt::Debug for NodeStateInternal<E>
 where
-    E: crate::node::GameEngine,
+    E: GameEngine,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -181,7 +184,7 @@ where
 
 impl<E> NodeStateInternal<E>
 where
-    E: crate::node::GameEngine,
+    E: GameEngine,
 {
     /// Check if currently in host mode
     #[allow(dead_code)]
@@ -247,7 +250,7 @@ where
         node_id: &NodeId,
     ) -> Result<()>
     where
-        E: crate::node::GameEngine,
+        E: GameEngine,
     {
         let prefix = prefix.into();
 
@@ -262,10 +265,10 @@ where
         // Create multinode liveliness watch for monitoring connected clients
         let client_liveliness_watch = NodeLivelinessWatch::new(node_id.clone());
 
-        *self = NodeStateInternal::Host(crate::host_state::HostState {
+        *self = NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
             engine,
-            liveliness_token: Some(token),
+            _liveliness_token: Some(token),
             queryable: Some(Arc::new(queryable)),
             client_liveliness_watch,
             game_state: None,
@@ -299,7 +302,7 @@ where
         let liveliness_token =
             NodeLivelinessToken::declare(session, prefix, Role::Client, client_id).await?;
 
-        *self = NodeStateInternal::Client(crate::client_state::ClientState {
+        *self = NodeStateInternal::Client(ClientState {
             host_id,
             liveliness_watch,
             liveliness_token,
@@ -311,7 +314,7 @@ where
 
 impl<E> From<&NodeStateInternal<E>> for NodeState<E::State>
 where
-    E: crate::node::GameEngine,
+    E: GameEngine,
 {
     fn from(internal: &NodeStateInternal<E>) -> Self {
         match internal {

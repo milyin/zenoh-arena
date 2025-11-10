@@ -1,7 +1,7 @@
 //! Key expression types for host discovery and connection
 
 use crate::error::ArenaError;
-use crate::types::NodeId;
+use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
 /// Role type for keyexpr

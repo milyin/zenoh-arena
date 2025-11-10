@@ -1,9 +1,10 @@
 //! Configuration for a Node
 
-use crate::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
-/// Main configuration for a Node
+use crate::node::types::NodeId;
+
+// Main configuration for a Node
 #[derive(Debug, Clone)]
 pub(crate) struct NodeConfig {
     /// Node identifier

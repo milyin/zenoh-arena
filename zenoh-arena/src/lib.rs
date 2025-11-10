@@ -52,20 +52,12 @@
 //!     println!("Node ID: {}", node.id());
 //! }
 //! ```
-
-// Module declarations
-pub mod config;
-pub mod error;
 pub(crate) mod network;
-pub mod node;
-pub(crate) mod client_state;
-pub(crate) mod host_state;
-pub(crate) mod searching_host_state;
-pub mod session_ext;
-pub mod types;
+pub(crate) mod node;
+pub(crate) mod error;
 
-// Re-exports for convenience
+// Re-exports external API
 pub use error::{ArenaError, Result};
-pub use node::{GameEngine, Node, NodeCommand};
-pub use session_ext::{NodeBuilder, SessionExt};
-pub use types::{NodeId, NodeInfo, NodeRole, NodeState};
+pub use node::node::{GameEngine, Node, NodeCommand};
+pub use node::session_ext::{NodeBuilder, SessionExt};
+pub use node::types::{NodeId, NodeInfo, NodeRole, NodeState};

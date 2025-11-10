@@ -1,22 +1,20 @@
-use crate::NodeCommand;
 /// Host state implementation
-use crate::config::NodeConfig;
-use crate::error::Result;
-use crate::network::host_queryable::HostRequest;
-use crate::types::{NodeId, NodeStateInternal};
 use std::sync::Arc;
+
+use crate::{network::host_queryable::HostRequest, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
+use crate::error::Result;
 
 /// State while acting as a host
 pub(crate) struct HostState<E>
 where
-    E: crate::node::GameEngine,
+    E: GameEngine,
 {
     /// List of connected client IDs
     pub(crate) connected_clients: Vec<NodeId>,
     /// Game engine (only present in Host mode)
     pub(crate) engine: E,
     /// Liveliness token for host discovery
-    pub(crate) liveliness_token: Option<crate::network::NodeLivelinessToken>,
+    pub(crate) _liveliness_token: Option<crate::network::NodeLivelinessToken>,
     /// Queryable for host discovery
     pub(crate) queryable: Option<Arc<crate::network::HostQueryable>>,
     /// Multinode liveliness watch to detect any client disconnect
@@ -27,7 +25,7 @@ where
 
 impl<E> HostState<E>
 where
-    E: crate::node::GameEngine,
+    E: GameEngine,
 {
     /// Process the Host state - handle client connections and game actions
     ///
@@ -44,7 +42,7 @@ where
         config: &NodeConfig,
         node_id: &NodeId,
         session: &zenoh::Session,
-        command_rx: &flume::Receiver<crate::node::NodeCommand<E::Action>>,
+        command_rx: &flume::Receiver<NodeCommand<E::Action>>,
     ) -> Result<NodeStateInternal<E>>
     {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);

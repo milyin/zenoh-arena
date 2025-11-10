@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::network::keyexpr::{NodeKeyexpr, Role};
-use crate::types::NodeId;
+use crate::node::types::NodeId;
 use futures::future::select_all;
 use std::pin::Pin;
 use zenoh::key_expr::KeyExpr;

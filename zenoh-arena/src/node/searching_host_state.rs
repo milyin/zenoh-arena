@@ -1,9 +1,9 @@
 /// SearchingHost state implementation
-use crate::config::NodeConfig;
+use super::config::NodeConfig;
 use crate::error::Result;
 use crate::network::HostQuerier;
-use crate::node::NodeCommand;
-use crate::types::{NodeId, NodeStateInternal};
+use super::node::{GameEngine, NodeCommand};
+use super::types::{NodeId, NodeStateInternal};
 
 /// State while searching for available hosts
 pub(crate) struct SearchingHostState;
@@ -23,7 +23,7 @@ impl SearchingHostState {
         get_engine: &dyn Fn() -> E,
     ) -> Result<NodeStateInternal<E>>
     where
-        E: crate::node::GameEngine,
+        E: GameEngine,
     {
         tracing::info!("Node '{}' searching for hosts...", node_id);
 
@@ -68,11 +68,11 @@ impl SearchingHostState {
                         tracing::info!("Node '{}' command channel closed during search", node_id);
                         return Ok(NodeStateInternal::Stop);
                     }
-                    Ok(crate::node::NodeCommand::Stop) => {
+                    Ok(NodeCommand::Stop) => {
                         tracing::info!("Node '{}' received Stop command during search, exiting", node_id);
                         return Ok(NodeStateInternal::Stop);
                     }
-                    Ok(crate::node::NodeCommand::GameAction(_)) => {
+                    Ok(NodeCommand::GameAction(_)) => {
                         tracing::warn!(
                             "Node '{}' received action while searching for host, ignoring",
                             node_id

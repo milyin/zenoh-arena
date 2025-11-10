@@ -1,8 +1,9 @@
 /// Node management module
-use crate::config::NodeConfig;
+use super::config::NodeConfig;
 use crate::error::{ArenaError, Result};
 use crate::network::NodeLivelinessToken;
-use crate::types::{NodeId, NodeState, NodeStateInternal};
+use crate::node::searching_host_state::SearchingHostState;
+use super::types::{NodeId, NodeState, NodeStateInternal};
 
 /// Commands that can be sent to the node
 #[derive(Debug, Clone)]
@@ -130,7 +131,6 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         // Dispatch based on current state using state-specific run methods
         let next_result = match std::mem::replace(&mut self.state, NodeStateInternal::SearchingHost) {
             NodeStateInternal::SearchingHost => {
-                use crate::searching_host_state::SearchingHostState;
                 let searching_state = SearchingHostState;
                 searching_state
                     .step(
@@ -189,6 +189,8 @@ pub trait GameEngine: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use crate::node::session_ext::SessionExt;
+
     use super::*;
 
     // Simple test engine for testing purposes
@@ -250,8 +252,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
-        use crate::session_ext::SessionExt;
-
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -264,8 +264,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_custom_name() {
-        use crate::session_ext::SessionExt;
-
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -282,8 +280,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_invalid_name() {
-        use crate::session_ext::SessionExt;
-
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -302,8 +298,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_step_with_force_host() {
-        use crate::session_ext::SessionExt;
-
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -330,8 +324,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_force_host_starts_in_host_state() {
-        use crate::session_ext::SessionExt;
-
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -346,8 +338,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
-        use crate::session_ext::SessionExt;
-
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -358,8 +348,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
-        use crate::session_ext::SessionExt;
-
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let get_engine = || TestEngine;
 
@@ -403,8 +391,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_session_ext_declare_arena_node() {
-        use crate::session_ext::SessionExt;
-
         // Create a zenoh session
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
 
