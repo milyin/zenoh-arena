@@ -1,7 +1,6 @@
 //! Liveliness token management
 
 use crate::error::Result;
-use crate::network::keyexpr::{KeyexprTemplate, Role};
 use crate::node::types::NodeId;
 use futures::future::select_all;
 use std::pin::Pin;
@@ -28,12 +27,10 @@ impl NodeLivelinessToken {
     /// If a conflict is detected, returns a LivelinessTokenConflict error.
     pub async fn declare(
         session: &zenoh::Session,
-        prefix: impl Into<KeyExpr<'static>>,
-        role: Role,
+        keyexpr: impl Into<KeyExpr<'static>>,
         node_id: NodeId,
     ) -> Result<Self> {
-        let node_keyexpr = KeyexprTemplate::new(prefix, role, Some(node_id.clone()), None);
-        let keyexpr: KeyExpr = node_keyexpr.into();
+        let keyexpr: KeyExpr = keyexpr.into();
 
         // Check if another token with the same keyexpr already exists
         let replies = session
@@ -103,12 +100,10 @@ impl NodeLivelinessWatch {
     pub async fn subscribe(
         &mut self,
         session: &zenoh::Session,
-        prefix: impl Into<KeyExpr<'static>>,
-        role: Role,
+        keyexpr: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
     ) -> Result<()> {
-        let node_keyexpr = KeyexprTemplate::new(prefix, role, Some(node_id.clone()), None);
-        let keyexpr: KeyExpr = node_keyexpr.into();
+        let keyexpr: KeyExpr = keyexpr.into();
 
         let subscriber = session
             .liveliness()

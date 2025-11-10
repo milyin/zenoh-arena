@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use zenoh::key_expr::KeyExpr;
 
-use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, Role};
+use crate::network::{HostQueryable, KeyexprClient, KeyexprHost, NodeLivelinessToken, NodeLivelinessWatch};
 use crate::node::client_state::ClientState;
 use crate::error::{ArenaError, Result};
 use crate::node::host_state::HostState;
@@ -254,8 +254,9 @@ where
         let prefix = prefix.into();
 
         // Create host liveliness token for discovery
+        let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(node_id.clone()));
         let token =
-            NodeLivelinessToken::declare(session, prefix.clone(), Role::Host, node_id.clone())
+            NodeLivelinessToken::declare(session, host_keyexpr, node_id.clone())
                 .await?;
 
         // Declare queryable for host discovery
@@ -293,13 +294,15 @@ where
 
         // Create and subscribe to liveliness events for the host
         let mut liveliness_watch = NodeLivelinessWatch::new(host_id.clone());
+        let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(host_id.clone()));
         liveliness_watch
-            .subscribe(session, prefix.clone(), Role::Host, &host_id)
+            .subscribe(session, host_keyexpr, &host_id)
             .await?;
 
         // Declare client liveliness token (role: Client) so host can track our presence
+        let client_keyexpr = KeyexprClient::new(prefix, Some(client_id.clone()));
         let liveliness_token =
-            NodeLivelinessToken::declare(session, prefix, Role::Client, client_id).await?;
+            NodeLivelinessToken::declare(session, client_keyexpr, client_id).await?;
 
         *self = NodeStateInternal::Client(ClientState {
             host_id,

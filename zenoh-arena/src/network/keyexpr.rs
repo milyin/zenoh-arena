@@ -4,288 +4,104 @@ use crate::error::ArenaError;
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
-/// Role type for keyexpr
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    /// Node role - `<prefix>/node/<node_id>` (node_a: node_id)
-    Node,
-    /// Host role - `<prefix>/host/<host_id>` (node_a: host_id)
-    Host,
-    /// Client role - `<prefix>/client/<client_id>` (node_a: client_id)
-    Client,
-    /// Shake role - `<prefix>/shake/<host_id>/<client_id>` (node_a: host_id, node_b: client_id)
-    Shake,
-    /// Link role - `<prefix>/link/<sender_id>/<receiver_id>` (node_a: sender_id, node_b: receiver_id)
-    Link,
-}
-
-impl Role {
-    /// Get the string representation of the role
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Role::Node => "node",
-            Role::Host => "host",
-            Role::Client => "client",
-            Role::Shake => "shake",
-            Role::Link => "link",
-        }
-    }
-
-    /// Parse a role from a string
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "node" => Some(Role::Node),
-            "host" => Some(Role::Host),
-            "client" => Some(Role::Client),
-            "shake" => Some(Role::Shake),
-            "link" => Some(Role::Link),
-            _ => None,
-        }
-    }
-
-    /// Whether this role can have node_b (only Shake and Link do)
-    pub fn has_remote_id(&self) -> bool {
-        matches!(self, Role::Shake | Role::Link)
-    }
-}
-
-/// Unified keyexpr for nodes, hosts, clients, and links
-///
-/// Pattern: `<prefix>/<role>/<node_a>` (for Node, Host, Client with specific IDs)
-/// Pattern: `<prefix>/<role>/*` (for Node, Host, Client with wildcards)
-/// Pattern: `<prefix>/shake/<node_a>/<node_b>` (for Shake: host_id/client_id)
-/// Pattern: `<prefix>/link/<node_a>/<node_b>` (for Link: sender_id/receiver_id)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyexprTemplate {
-    prefix: KeyExpr<'static>,
-    role: Role,
-    node_a: Option<NodeId>,
-    node_b: Option<NodeId>,
-}
-
-impl KeyexprTemplate {
-    /// Create a new NodeKeyexpr
-    pub fn new<P: Into<KeyExpr<'static>>>(
-        prefix: P,
-        role: Role,
-        node_a: Option<NodeId>,
-        node_b: Option<NodeId>,
-    ) -> Self {
-        // Validate: node_b is only for Shake and Link roles
-        if !role.has_remote_id() && node_b.is_some() {
-            panic!("node_b can only be used with Shake or Link role");
-        }
-        Self {
-            prefix: prefix.into(),
-            role,
-            node_a,
-            node_b,
-        }
-    }
-
-    /// Get the prefix
-    pub fn prefix(&self) -> &KeyExpr<'static> {
-        &self.prefix
-    }
-
-    /// Get the role
-    pub fn role(&self) -> Role {
-        self.role
-    }
-
-    /// Get node_a (None means wildcard)
-    /// - Node: node_id
-    /// - Host: host_id
-    /// - Client: client_id
-    /// - Shake: host_id
-    /// - Link: sender_id
-    pub fn node_a(&self) -> &Option<NodeId> {
-        &self.node_a
-    }
-
-    /// Get node_b (only for Shake and Link roles, None means wildcard)
-    /// - Shake: client_id
-    /// - Link: receiver_id
-    pub fn node_b(&self) -> &Option<NodeId> {
-        &self.node_b
-    }
-}
-
-impl TryFrom<KeyExpr<'_>> for KeyexprTemplate {
-    type Error = ArenaError;
-
-    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-        let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
-
-        // Expected pattern: [...prefix]/<role>/<node_a>[/<node_b>]
-        // At minimum: prefix, role, node_a (3 parts total if we count parts as separate)
-        // For "arena/game1/host/host1" we have parts: ["arena", "game1", "host", "host1"]
-        if parts.len() < 3 {
-            return Err(ArenaError::InvalidKeyexpr(format!(
-                "Invalid NodeKeyexpr pattern: {}",
-                keyexpr.as_str()
-            )));
-        }
-
-        // Try to determine the role by looking backwards
-        // For Shake/Link: [...prefix]/shake|link/<node_a>/<node_b> - at least 4 parts
-        // For others: [...prefix]/<role>/<node_a> - at least 3 parts
-
-        // First, try to interpret as Shake/Link (4 parts minimum)
-        if parts.len() >= 4 {
-            let possible_role_str = parts[parts.len() - 3];
-            if let Some(role) = Role::from_str(possible_role_str) {
-                if role.has_remote_id() {
-                    // This is a Shake/Link with 4+ parts: [...prefix]/shake|link/<node_a>/<node_b>
-                    let node_a_str = parts[parts.len() - 2];
-                    let node_b_str = parts[parts.len() - 1];
-
-                    let node_a = if node_a_str == "*" {
-                        None
-                    } else {
-                        Some(NodeId::from_name(node_a_str.to_string())?)
-                    };
-                    let node_b = if node_b_str == "*" {
-                        None
-                    } else {
-                        Some(NodeId::from_name(node_b_str.to_string())?)
-                    };
-
-                    let prefix_str = parts[..parts.len() - 3].join("/");
-                    let prefix = KeyExpr::try_from(prefix_str)?.into_owned();
-
-                    return Ok(Self {
-                        prefix,
-                        role,
-                        node_a,
-                        node_b,
-                    });
-                }
-            }
-        }
-
-        // Otherwise, interpret as 3-part pattern: [...prefix]/<role>/<node_a>
-        let role_str = parts[parts.len() - 2];
-        let role = Role::from_str(role_str).ok_or_else(|| {
-            ArenaError::InvalidKeyexpr(format!(
-                "Invalid role '{}' in keyexpr: {}",
-                role_str,
-                keyexpr.as_str()
-            ))
-        })?;
-
-        if role.has_remote_id() {
-            return Err(ArenaError::InvalidKeyexpr(format!(
-                "Shake/Link role requires node_b in keyexpr: {}",
-                keyexpr.as_str()
-            )));
-        }
-
-        let node_a_str = parts[parts.len() - 1];
-        let node_a = if node_a_str == "*" {
-            None
-        } else {
-            Some(NodeId::from_name(node_a_str.to_string())?)
-        };
-
-        let prefix_str = parts[..parts.len() - 2].join("/");
-        let prefix = KeyExpr::try_from(prefix_str)?.into_owned();
-
-        Ok(Self {
-            prefix,
-            role,
-            node_a,
-            node_b: None,
-        })
-    }
-}
-
-impl From<KeyexprTemplate> for KeyExpr<'static> {
-    fn from(keyexpr: KeyexprTemplate) -> Self {
-        let keyexpr_str = if keyexpr.role.has_remote_id() {
-            // Shake/Link role: <prefix>/shake|link/<node_a>/<node_b>
-            let node_a_str = match &keyexpr.node_a {
-                Some(id) => id.as_str().to_string(),
-                None => "*".to_string(),
-            };
-            let node_b_str = match &keyexpr.node_b {
-                Some(id) => id.as_str().to_string(),
-                None => "*".to_string(),
-            };
-            format!(
-                "{}/{}/{}/{}",
-                keyexpr.prefix.as_str(),
-                keyexpr.role.as_str(),
-                node_a_str,
-                node_b_str
-            )
-        } else {
-            // Other roles: <prefix>/<role>/<node_a>
-            let node_a_str = match &keyexpr.node_a {
-                Some(id) => id.as_str().to_string(),
-                None => "*".to_string(),
-            };
-            format!(
-                "{}/{}/{}",
-                keyexpr.prefix.as_str(),
-                keyexpr.role.as_str(),
-                node_a_str
-            )
-        };
-        KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
-    }
-}
-
 /// Macro to define single-node keyexpr wrappers (Node, Host, Client)
-/// These wrappers use only node_a from the template
+/// These wrappers have only one node ID field
 macro_rules! define_single_node_keyexpr {
     (
         $(#[$meta:meta])*
         $name:ident,
-        $role:ident,
+        $role_str:expr,
         $id_name:ident,
         $doc_comment:expr
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub struct $name {
-            template: KeyexprTemplate,
+            prefix: KeyExpr<'static>,
+            $id_name: Option<NodeId>,
         }
 
         impl $name {
             #[doc = $doc_comment]
             pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, $id_name: Option<NodeId>) -> Self {
                 Self {
-                    template: KeyexprTemplate::new(prefix, Role::$role, $id_name, None),
+                    prefix: prefix.into(),
+                    $id_name,
                 }
             }
 
             /// Get the prefix
             pub fn prefix(&self) -> &KeyExpr<'static> {
-                self.template.prefix()
+                &self.prefix
             }
 
             #[doc = concat!("Get the ", stringify!($id_name), " (None means wildcard)")]
             pub fn $id_name(&self) -> &Option<NodeId> {
-                self.template.node_a()
+                &self.$id_name
             }
         }
 
         impl From<$name> for KeyExpr<'static> {
             fn from(keyexpr: $name) -> Self {
-                keyexpr.template.into()
+                let id_str = match &keyexpr.$id_name {
+                    Some(id) => id.as_str().to_string(),
+                    None => "*".to_string(),
+                };
+                let keyexpr_str = format!(
+                    "{}/{}/{}",
+                    keyexpr.prefix.as_str(),
+                    $role_str,
+                    id_str
+                );
+                KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
+            }
+        }
+
+        impl TryFrom<KeyExpr<'_>> for $name {
+            type Error = ArenaError;
+
+            fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
+                let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
+
+                if parts.len() < 3 {
+                    return Err(ArenaError::InvalidKeyexpr(format!(
+                        "Invalid keyexpr pattern: {}",
+                        keyexpr.as_str()
+                    )));
+                }
+
+                let role_str = parts[parts.len() - 2];
+                if role_str != $role_str {
+                    return Err(ArenaError::InvalidKeyexpr(format!(
+                        "Expected {} role, found '{}'",
+                        $role_str,
+                        role_str
+                    )));
+                }
+
+                let id_str = parts[parts.len() - 1];
+                let $id_name = if id_str == "*" {
+                    None
+                } else {
+                    Some(NodeId::from_name(id_str.to_string())?)
+                };
+
+                let prefix_str = parts[..parts.len() - 2].join("/");
+                let prefix = KeyExpr::try_from(prefix_str)?.into_owned();
+
+                Ok(Self { prefix, $id_name })
             }
         }
     };
 }
 
 /// Macro to define dual-node keyexpr wrappers (Shake, Link)
-/// These wrappers use both node_a and node_b from the template
+/// These wrappers have two node ID fields
 macro_rules! define_dual_node_keyexpr {
     (
         $(#[$meta:meta])*
         $name:ident,
-        $role:ident,
+        $role_str:expr,
         $id_a_name:ident,
         $id_b_name:ident,
         $doc_comment:expr
@@ -293,7 +109,9 @@ macro_rules! define_dual_node_keyexpr {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub struct $name {
-            template: KeyexprTemplate,
+            prefix: KeyExpr<'static>,
+            $id_a_name: Option<NodeId>,
+            $id_b_name: Option<NodeId>,
         }
 
         impl $name {
@@ -304,29 +122,46 @@ macro_rules! define_dual_node_keyexpr {
                 $id_b_name: Option<NodeId>,
             ) -> Self {
                 Self {
-                    template: KeyexprTemplate::new(prefix, Role::$role, $id_a_name, $id_b_name),
+                    prefix: prefix.into(),
+                    $id_a_name,
+                    $id_b_name,
                 }
             }
 
             /// Get the prefix
             pub fn prefix(&self) -> &KeyExpr<'static> {
-                self.template.prefix()
+                &self.prefix
             }
 
             #[doc = concat!("Get the ", stringify!($id_a_name), " (None means wildcard)")]
             pub fn $id_a_name(&self) -> &Option<NodeId> {
-                self.template.node_a()
+                &self.$id_a_name
             }
 
             #[doc = concat!("Get the ", stringify!($id_b_name), " (None means wildcard)")]
             pub fn $id_b_name(&self) -> &Option<NodeId> {
-                self.template.node_b()
+                &self.$id_b_name
             }
         }
 
         impl From<$name> for KeyExpr<'static> {
             fn from(keyexpr: $name) -> Self {
-                keyexpr.template.into()
+                let id_a_str = match &keyexpr.$id_a_name {
+                    Some(id) => id.as_str().to_string(),
+                    None => "*".to_string(),
+                };
+                let id_b_str = match &keyexpr.$id_b_name {
+                    Some(id) => id.as_str().to_string(),
+                    None => "*".to_string(),
+                };
+                let keyexpr_str = format!(
+                    "{}/{}/{}/{}",
+                    keyexpr.prefix.as_str(),
+                    $role_str,
+                    id_a_str,
+                    id_b_str
+                );
+                KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
             }
         }
 
@@ -334,15 +169,46 @@ macro_rules! define_dual_node_keyexpr {
             type Error = ArenaError;
 
             fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
-                let template = KeyexprTemplate::try_from(keyexpr)?;
-                if template.role() != Role::$role {
+                let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
+
+                if parts.len() < 4 {
                     return Err(ArenaError::InvalidKeyexpr(format!(
-                        "Expected {} role, found {:?}",
-                        stringify!($role),
-                        template.role()
+                        "Invalid keyexpr pattern: {}",
+                        keyexpr.as_str()
                     )));
                 }
-                Ok(Self { template })
+
+                let role_str = parts[parts.len() - 3];
+                if role_str != $role_str {
+                    return Err(ArenaError::InvalidKeyexpr(format!(
+                        "Expected {} role, found '{}'",
+                        $role_str,
+                        role_str
+                    )));
+                }
+
+                let id_a_str = parts[parts.len() - 2];
+                let $id_a_name = if id_a_str == "*" {
+                    None
+                } else {
+                    Some(NodeId::from_name(id_a_str.to_string())?)
+                };
+
+                let id_b_str = parts[parts.len() - 1];
+                let $id_b_name = if id_b_str == "*" {
+                    None
+                } else {
+                    Some(NodeId::from_name(id_b_str.to_string())?)
+                };
+
+                let prefix_str = parts[..parts.len() - 3].join("/");
+                let prefix = KeyExpr::try_from(prefix_str)?.into_owned();
+
+                Ok(Self {
+                    prefix,
+                    $id_a_name,
+                    $id_b_name,
+                })
             }
         }
     };
@@ -352,7 +218,7 @@ macro_rules! define_dual_node_keyexpr {
 define_single_node_keyexpr!(
     /// Wrapper for Node role keyexpr: `<prefix>/node/<node_id>`
     KeyexprNode,
-    Node,
+    "node",
     node_id,
     "Create a new Node keyexpr"
 );
@@ -360,7 +226,7 @@ define_single_node_keyexpr!(
 define_single_node_keyexpr!(
     /// Wrapper for Host role keyexpr: `<prefix>/host/<host_id>`
     KeyexprHost,
-    Host,
+    "host",
     host_id,
     "Create a new Host keyexpr"
 );
@@ -368,7 +234,7 @@ define_single_node_keyexpr!(
 define_single_node_keyexpr!(
     /// Wrapper for Client role keyexpr: `<prefix>/client/<client_id>`
     KeyexprClient,
-    Client,
+    "client",
     client_id,
     "Create a new Client keyexpr"
 );
@@ -377,7 +243,7 @@ define_single_node_keyexpr!(
 define_dual_node_keyexpr!(
     /// Wrapper for Shake role keyexpr: `<prefix>/shake/<host_id>/<client_id>`
     KeyexprShake,
-    Shake,
+    "shake",
     host_id,
     client_id,
     "Create a new Shake keyexpr for handshake"
@@ -386,7 +252,7 @@ define_dual_node_keyexpr!(
 define_dual_node_keyexpr!(
     /// Wrapper for Link role keyexpr: `<prefix>/link/<sender_id>/<receiver_id>`
     KeyexprLink,
-    Link,
+    "link",
     sender_id,
     receiver_id,
     "Create a new Link keyexpr for data communication"
@@ -399,93 +265,87 @@ mod tests {
     #[test]
     fn test_link_keyexpr_creation() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let node_a = NodeId::from_name("host1".to_string()).unwrap();
-        let node_b = NodeId::from_name("client1".to_string()).unwrap();
+        let sender = NodeId::from_name("host1".to_string()).unwrap();
+        let receiver = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = KeyexprTemplate::new(
+        let link_keyexpr = KeyexprLink::new(
             prefix,
-            Role::Link,
-            Some(node_a.clone()),
-            Some(node_b.clone()),
+            Some(sender.clone()),
+            Some(receiver.clone()),
         );
-        assert_eq!(link_keyexpr.node_a(), &Some(node_a));
-        assert_eq!(link_keyexpr.node_b(), &Some(node_b));
+        assert_eq!(link_keyexpr.sender_id(), &Some(sender));
+        assert_eq!(link_keyexpr.receiver_id(), &Some(receiver));
         assert_eq!(link_keyexpr.prefix().as_str(), "arena/game1");
     }
 
     #[test]
     fn test_link_keyexpr_roundtrip() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let node_a = NodeId::from_name("host1".to_string()).unwrap();
-        let node_b = NodeId::from_name("client1".to_string()).unwrap();
+        let sender = NodeId::from_name("host1".to_string()).unwrap();
+        let receiver = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = KeyexprTemplate::new(
+        let link_keyexpr = KeyexprLink::new(
             prefix,
-            Role::Link,
-            Some(node_a.clone()),
-            Some(node_b.clone()),
+            Some(sender.clone()),
+            Some(receiver.clone()),
         );
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/client1");
 
-        let parsed = KeyexprTemplate::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.node_a(), &Some(node_a));
-        assert_eq!(parsed.node_b(), &Some(node_b));
-        assert_eq!(parsed.role(), Role::Link);
+        let parsed = KeyexprLink::try_from(keyexpr).unwrap();
+        assert_eq!(parsed.sender_id(), &Some(sender));
+        assert_eq!(parsed.receiver_id(), &Some(receiver));
     }
 
     #[test]
     fn test_link_keyexpr_wildcard_remote() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let node_a = NodeId::from_name("host1".to_string()).unwrap();
+        let sender = NodeId::from_name("host1".to_string()).unwrap();
 
-        let link_keyexpr = KeyexprTemplate::new(prefix, Role::Link, Some(node_a.clone()), None);
+        let link_keyexpr = KeyexprLink::new(prefix, Some(sender.clone()), None);
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/*");
 
-        let parsed = KeyexprTemplate::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.node_a(), &Some(node_a));
-        assert_eq!(parsed.node_b(), &None);
-        assert_eq!(parsed.role(), Role::Link);
+        let parsed = KeyexprLink::try_from(keyexpr).unwrap();
+        assert_eq!(parsed.sender_id(), &Some(sender));
+        assert_eq!(parsed.receiver_id(), &None);
     }
 
     #[test]
     fn test_link_keyexpr_wildcard_own() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let node_b = NodeId::from_name("client1".to_string()).unwrap();
+        let receiver = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = KeyexprTemplate::new(prefix, Role::Link, None, Some(node_b.clone()));
+        let link_keyexpr = KeyexprLink::new(prefix, None, Some(receiver.clone()));
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/*/client1");
 
-        let parsed = KeyexprTemplate::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.node_a(), &None);
-        assert_eq!(parsed.node_b(), &Some(node_b));
-        assert_eq!(parsed.role(), Role::Link);
+        let parsed = KeyexprLink::try_from(keyexpr).unwrap();
+        assert_eq!(parsed.sender_id(), &None);
+        assert_eq!(parsed.receiver_id(), &Some(receiver));
     }
 
     #[test]
     fn test_link_keyexpr_wildcard_both() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
 
-        let link_keyexpr = KeyexprTemplate::new(prefix, Role::Link, None, None);
+        let link_keyexpr = KeyexprLink::new(prefix, None, None);
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/*/*");
 
-        let parsed = KeyexprTemplate::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.node_a(), &None);
-        assert_eq!(parsed.node_b(), &None);
-        assert_eq!(parsed.role(), Role::Link);
+        let parsed = KeyexprLink::try_from(keyexpr).unwrap();
+        assert_eq!(parsed.sender_id(), &None);
+        assert_eq!(parsed.receiver_id(), &None);
     }
 
     #[test]
     fn test_link_keyexpr_invalid_pattern() {
         let keyexpr = KeyExpr::try_from("arena/game1/invalid/host1/client1").unwrap();
-        let result = KeyexprTemplate::try_from(keyexpr);
+        let result = KeyexprLink::try_from(keyexpr);
         assert!(result.is_err());
     }
 }
