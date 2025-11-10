@@ -12,8 +12,8 @@ use zenoh_arena::{NodeCommand, NodeState, SessionExt};
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Node name
-    #[arg(short, long, default_value = "bonjour_node")]
-    name: String,
+    #[arg(short, long)]
+    name: Option<String>,
 
     /// Key expression prefix
     #[arg(short, long)]
@@ -53,8 +53,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut node_builder = session
         .declare_arena_node(BonjourEngine::new)
         .force_host(args.force_host)
-        .name(args.name.clone())?
         .step_timeout_ms(1000);
+
+    // Apply name if provided
+    if let Some(name) = args.name.clone().into() {
+        node_builder = node_builder.name(name)?;
+    }
 
     // Apply prefix if provided
     if let Some(prefix) = args.prefix.clone() {
@@ -64,7 +68,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut node = node_builder.await?;
 
     println!("=== z_bonjour - Zenoh Arena Demo ===");
-    println!("Node name: {}", args.name);
     println!("Node ID: {}", node.id());
     println!("Force host: {}", args.force_host);
     if let Some(ref prefix) = args.prefix {
