@@ -21,7 +21,7 @@ impl SearchingHostState {
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
         get_engine: &dyn Fn() -> E,
-    ) -> Result<Option<NodeStateInternal<E>>>
+    ) -> Result<NodeStateInternal<E>>
     where
         E: crate::node::GameEngine,
     {
@@ -66,11 +66,11 @@ impl SearchingHostState {
                 result = command_rx.recv_async() => match result {
                     Err(_) => {
                         tracing::info!("Node '{}' command channel closed during search", node_id);
-                        return Ok(None);
+                        return Ok(NodeStateInternal::Stop);
                     }
                     Ok(crate::node::NodeCommand::Stop) => {
                         tracing::info!("Node '{}' received Stop command during search, exiting", node_id);
-                        return Ok(None);
+                        return Ok(NodeStateInternal::Stop);
                     }
                     Ok(crate::node::NodeCommand::GameAction(_)) => {
                         tracing::warn!(
@@ -95,7 +95,7 @@ impl SearchingHostState {
                     node_id.clone(),
                 )
                 .await?;
-            Ok(Some(next_state))
+            Ok(next_state)
         } else {
             // Transition to Host state
             let mut next_state = NodeStateInternal::SearchingHost;
@@ -107,7 +107,7 @@ impl SearchingHostState {
                     node_id,
                 )
                 .await?;
-            Ok(Some(next_state))
+            Ok(next_state)
         }
     }
 }

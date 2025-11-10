@@ -116,10 +116,10 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
     /// Returns when either:
     /// - A new game state is produced by the engine
     /// - The step timeout (configured in NodeConfig) elapses
-    /// - A Stop command is received (returns None)
+    /// - A Stop command is received (returns Stop state)
     ///
-    /// Returns None if Stop command was received, indicating the node should shut down.
-    pub async fn step(&mut self) -> Result<Option<NodeState<E::State>>> {
+    /// Returns Stop state if Stop command was received, indicating the node should shut down.
+    pub async fn step(&mut self) -> Result<NodeState<E::State>> {
         // If force_host is enabled, only Host state is allowed
         if self.config.force_host && !matches!(self.state, NodeStateInternal::Host { .. }) {
             return Err(ArenaError::Internal(
@@ -152,16 +152,19 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     .step(&self.config, &self.id, &self.session, &self.command_rx)
                     .await
             }
+            NodeStateInternal::Stop => {
+                // If already stopped, remain stopped
+                Ok(NodeStateInternal::Stop)
+            }
         };
         
         // Update state with the next state returned from run() and generate NodeState
         match next_result {
-            Ok(Some(next_state)) => {
+            Ok(next_state) => {
                 let state = NodeState::from(&next_state);
                 self.state = next_state;
-                Ok(Some(state))
+                Ok(state)
             }
-            Ok(None) => Ok(None),
             Err(e) => Err(e),
         }
     }
@@ -314,15 +317,15 @@ mod tests {
 
         // Test one step first
         let status = node.step().await.unwrap();
-        assert!(status.is_some());
+        assert!(!matches!(status, NodeState::Stop));
 
         // Send Stop command via async channel
         command_tx.send(NodeCommand::Stop).unwrap();
 
-        // Execute the next step which should return None due to Stop command
+        // Execute the next step which should return Stop state
         let result = node.step().await;
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(matches!(result.unwrap(), NodeState::Stop));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -375,7 +378,7 @@ mod tests {
 
         // Call step to process first action
         let _state1 = node.step().await.unwrap();
-        assert!(_state1.is_some());
+        assert!(!matches!(_state1, NodeState::Stop));
         
         // Game state is now stored internally in HostState
         if let NodeStateInternal::Host(host_state) = &node.state {
@@ -387,7 +390,7 @@ mod tests {
 
         // Call step to process second action
         let _state2 = node.step().await.unwrap();
-        assert!(_state2.is_some());
+        assert!(!matches!(_state2, NodeState::Stop));
         
         // Game state is updated
         if let NodeStateInternal::Host(host_state) = &node.state {

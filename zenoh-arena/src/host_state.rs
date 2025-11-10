@@ -31,13 +31,13 @@ where
 {
     /// Process the Host state - handle client connections and game actions
     ///
-    /// Consumes self and returns the next state (Host or None if stopped).
+    /// Consumes self and returns the next state (Host or Stop if stopped).
     /// Handles commands from the command channel and processes game actions through the engine.
     /// Also monitors client liveliness to detect disconnections.
     /// Returns when either:
     /// - A new game state is produced by the engine
     /// - The step timeout elapses
-    /// - A Stop command is received (returns None)
+    /// - A Stop command is received (returns Stop)
     /// - A client disconnects (handled and continues loop)
     pub(crate) async fn step(
         mut self,
@@ -45,7 +45,7 @@ where
         node_id: &NodeId,
         session: &zenoh::Session,
         command_rx: &flume::Receiver<crate::node::NodeCommand<E::Action>>,
-    ) -> Result<Option<NodeStateInternal<E>>>
+    ) -> Result<NodeStateInternal<E>>
     {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
@@ -80,11 +80,11 @@ where
             result = command_rx.recv_async() => match result {
                 Err(_) => {
                     tracing::info!("Node '{}' command channel closed", node_id);
-                    return Ok(None);
+                    return Ok(NodeStateInternal::Stop);
                 }
                 Ok(NodeCommand::Stop) => {
                     tracing::info!("Node '{}' received Stop command, exiting", node_id);
-                    return Ok(None);
+                    return Ok(NodeStateInternal::Stop);
                 }
                 Ok(NodeCommand::GameAction(action)) => {
                     tracing::debug!(
@@ -99,7 +99,7 @@ where
             }
         } {}
 
-        Ok(Some(NodeStateInternal::Host(self)))
+        Ok(NodeStateInternal::Host(self))
     }
 
     /// Handle a connection request from a client

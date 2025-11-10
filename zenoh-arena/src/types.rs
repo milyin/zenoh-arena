@@ -105,6 +105,8 @@ pub enum NodeState<S = ()> {
         /// Current game state (if available)
         game_state: Option<S>,
     },
+    /// Node has stopped
+    Stop,
 }
 
 impl<S> std::fmt::Display for NodeState<S> {
@@ -129,6 +131,7 @@ impl<S> std::fmt::Display for NodeState<S> {
                     )
                 }
             }
+            NodeState::Stop => write!(f, "Node stopped"),
         }
     }
 }
@@ -149,6 +152,9 @@ where
 
     /// Acting as host
     Host(crate::host_state::HostState<E>),
+
+    /// Node has stopped
+    Stop,
 }
 
 impl<E> std::fmt::Debug for NodeStateInternal<E>
@@ -168,6 +174,7 @@ where
                 .field("connected_clients", &host_state.connected_clients)
                 .field("pending_client_disconnects_count", &"<futures>")
                 .finish(),
+            NodeStateInternal::Stop => f.debug_tuple("Stop").finish(),
         }
     }
 }
@@ -329,6 +336,7 @@ where
                     game_state: host_state.game_state.clone(),
                 }
             }
+            NodeStateInternal::Stop => NodeState::Stop,
         }
     }
 }

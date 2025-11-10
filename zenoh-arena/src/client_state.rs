@@ -24,13 +24,13 @@ impl ClientState {
     /// Returns when either:
     /// - Host liveliness is lost (transitions back to SearchingHost)
     /// - The step timeout elapses
-    /// - A Stop command is received (returns None)
+    /// - A Stop command is received (returns Stop)
     pub(crate) async fn step<E>(
         mut self,
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<crate::node::NodeCommand<E::Action>>,
-    ) -> Result<Option<NodeStateInternal<E>>>
+    ) -> Result<NodeStateInternal<E>>
     where
         E: crate::node::GameEngine,
     {
@@ -43,7 +43,7 @@ impl ClientState {
             tokio::select! {
                 // Timeout elapsed
                 () = &mut sleep => {
-                    return Ok(Some(NodeStateInternal::Client(self)));
+                    return Ok(NodeStateInternal::Client(self));
                 }
                 // Host liveliness lost - disconnect and return to searching
                 disconnect_result = self.liveliness_watch.disconnected() => {
@@ -51,12 +51,12 @@ impl ClientState {
                         Ok(disconnected_id) => {
                             tracing::info!("Node '{}' detected host '{}' disconnection, returning to search", node_id, disconnected_id);
                             // Transition back to SearchingHost
-                            return Ok(Some(NodeStateInternal::SearchingHost));
+                            return Ok(NodeStateInternal::SearchingHost);
                         }
                         Err(e) => {
                             tracing::warn!("Node '{}' liveliness error: {}", node_id, e);
                             // Treat error as disconnect
-                            return Ok(Some(NodeStateInternal::SearchingHost));
+                            return Ok(NodeStateInternal::SearchingHost);
                         }
                     }
                 }
@@ -64,11 +64,11 @@ impl ClientState {
                 result = command_rx.recv_async() => match result {
                     Err(_) => {
                         tracing::info!("Node '{}' command channel closed", node_id);
-                        return Ok(None);
+                        return Ok(NodeStateInternal::Stop);
                     }
                     Ok(crate::node::NodeCommand::Stop) => {
                         tracing::info!("Node '{}' received Stop command, exiting", node_id);
-                        return Ok(None);
+                        return Ok(NodeStateInternal::Stop);
                     }
                     Ok(crate::node::NodeCommand::GameAction(_action)) => {
                         tracing::debug!(
