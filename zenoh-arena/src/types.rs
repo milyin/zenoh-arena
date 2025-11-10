@@ -167,7 +167,6 @@ where
         /// Watches for host liveliness to detect disconnection
         liveliness_watch: NodeLivelinessWatch,
         /// Client's liveliness token (role: Client) for the host to track disconnection
-        #[allow(dead_code)]
         liveliness_token: NodeLivelinessToken,
     },
 

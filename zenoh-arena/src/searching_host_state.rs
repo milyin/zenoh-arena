@@ -2,6 +2,7 @@
 use crate::config::NodeConfig;
 use crate::error::Result;
 use crate::network::HostQuerier;
+use crate::node::NodeCommand;
 use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
 
 /// State while searching for available hosts
@@ -18,7 +19,7 @@ impl SearchingHostState {
         session: &zenoh::Session,
         config: &NodeConfig,
         node_id: &NodeId,
-        command_rx: &flume::Receiver<crate::node::NodeCommand<E::Action>>,
+        command_rx: &flume::Receiver<NodeCommand<E::Action>>,
         get_engine: &dyn Fn() -> E,
     ) -> Result<Option<NodeStatus<E::State>>>
     where
