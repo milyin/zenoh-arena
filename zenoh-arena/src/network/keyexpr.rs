@@ -4,6 +4,18 @@ use crate::error::ArenaError;
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
+/// Trait for keyexpr types that have a single node ID
+pub trait KeyexprNodeTrait {
+    /// Get the node ID (None means wildcard)
+    fn node_id(&self) -> &Option<NodeId>;
+}
+
+/// Trait for keyexpr types that have two node IDs
+pub trait KeyexprNode2Trait: KeyexprNodeTrait {
+    /// Get the second node ID (None means wildcard)
+    fn node2_id(&self) -> &Option<NodeId>;
+}
+
 /// Macro to define single-node keyexpr wrappers (Node, Host, Client)
 /// These wrappers have only one node ID field
 macro_rules! define_single_node_keyexpr {
@@ -90,6 +102,12 @@ macro_rules! define_single_node_keyexpr {
                 let prefix = KeyExpr::try_from(prefix_str)?.into_owned();
 
                 Ok(Self { prefix, $id_name })
+            }
+        }
+
+        impl KeyexprNodeTrait for $name {
+            fn node_id(&self) -> &Option<NodeId> {
+                &self.$id_name
             }
         }
     };
@@ -209,6 +227,18 @@ macro_rules! define_dual_node_keyexpr {
                     $id_a_name,
                     $id_b_name,
                 })
+            }
+        }
+
+        impl KeyexprNodeTrait for $name {
+            fn node_id(&self) -> &Option<NodeId> {
+                &self.$id_a_name
+            }
+        }
+
+        impl KeyexprNode2Trait for $name {
+            fn node2_id(&self) -> &Option<NodeId> {
+                &self.$id_b_name
             }
         }
     };
@@ -347,5 +377,104 @@ mod tests {
         let keyexpr = KeyExpr::try_from("arena/game1/invalid/host1/client1").unwrap();
         let result = KeyexprLink::try_from(keyexpr);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_single_node_trait() {
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        let node_id = NodeId::from_name("mynode".to_string()).unwrap();
+
+        // Test KeyexprNode implements KeyexprNodeTrait
+        let node_keyexpr = KeyexprNode::new(prefix.clone(), Some(node_id.clone()));
+        assert_eq!(node_keyexpr.node_id(), &Some(node_id.clone()));
+
+        // Test KeyexprHost implements KeyexprNodeTrait
+        let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(node_id.clone()));
+        assert_eq!(host_keyexpr.node_id(), &Some(node_id.clone()));
+
+        // Test KeyexprClient implements KeyexprNodeTrait
+        let client_keyexpr = KeyexprClient::new(prefix, Some(node_id.clone()));
+        assert_eq!(client_keyexpr.node_id(), &Some(node_id));
+    }
+
+    #[test]
+    fn test_dual_node_trait() {
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        let node1 = NodeId::from_name("node1".to_string()).unwrap();
+        let node2 = NodeId::from_name("node2".to_string()).unwrap();
+
+        // Test KeyexprShake implements both traits
+        let shake_keyexpr = KeyexprShake::new(prefix.clone(), Some(node1.clone()), Some(node2.clone()));
+        assert_eq!(shake_keyexpr.node_id(), &Some(node1.clone()));
+        assert_eq!(shake_keyexpr.node2_id(), &Some(node2.clone()));
+
+        // Test KeyexprLink implements both traits
+        let link_keyexpr = KeyexprLink::new(prefix, Some(node1.clone()), Some(node2.clone()));
+        assert_eq!(link_keyexpr.node_id(), &Some(node1));
+        assert_eq!(link_keyexpr.node2_id(), &Some(node2));
+    }
+
+    #[test]
+    fn test_trait_with_wildcard() {
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        
+        // Single-node with wildcard
+        let host_keyexpr = KeyexprHost::new(prefix.clone(), None);
+        assert_eq!(host_keyexpr.node_id(), &None);
+
+        // Dual-node with wildcards
+        let link_keyexpr = KeyexprLink::new(prefix, None, None);
+        assert_eq!(link_keyexpr.node_id(), &None);
+        assert_eq!(link_keyexpr.node2_id(), &None);
+    }
+
+    #[test]
+    fn test_trait_generic_function() {
+        // Helper function that works with any type implementing KeyexprNodeTrait
+        fn get_node_or_default<T: KeyexprNodeTrait>(keyexpr: &T) -> String {
+            match keyexpr.node_id() {
+                Some(id) => id.as_str().to_string(),
+                None => "wildcard".to_string(),
+            }
+        }
+
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        let node_id = NodeId::from_name("mynode".to_string()).unwrap();
+
+        let node_keyexpr = KeyexprNode::new(prefix.clone(), Some(node_id.clone()));
+        assert_eq!(get_node_or_default(&node_keyexpr), "mynode");
+
+        let host_keyexpr = KeyexprHost::new(prefix.clone(), None);
+        assert_eq!(get_node_or_default(&host_keyexpr), "wildcard");
+
+        // Also works with dual-node types
+        let link_keyexpr = KeyexprLink::new(prefix, Some(node_id), None);
+        assert_eq!(get_node_or_default(&link_keyexpr), "mynode");
+    }
+
+    #[test]
+    fn test_trait_generic_function_dual() {
+        // Helper function that works with any type implementing KeyexprNode2Trait
+        fn get_both_nodes<T: KeyexprNode2Trait>(keyexpr: &T) -> (String, String) {
+            let node1 = match keyexpr.node_id() {
+                Some(id) => id.as_str().to_string(),
+                None => "*".to_string(),
+            };
+            let node2 = match keyexpr.node2_id() {
+                Some(id) => id.as_str().to_string(),
+                None => "*".to_string(),
+            };
+            (node1, node2)
+        }
+
+        let prefix = KeyExpr::try_from("arena/game1").unwrap();
+        let node1 = NodeId::from_name("node1".to_string()).unwrap();
+        let node2 = NodeId::from_name("node2".to_string()).unwrap();
+
+        let shake_keyexpr = KeyexprShake::new(prefix.clone(), Some(node1.clone()), Some(node2.clone()));
+        assert_eq!(get_both_nodes(&shake_keyexpr), ("node1".to_string(), "node2".to_string()));
+
+        let link_keyexpr = KeyexprLink::new(prefix, None, Some(node2));
+        assert_eq!(get_both_nodes(&link_keyexpr), ("*".to_string(), "node2".to_string()));
     }
 }
