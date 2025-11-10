@@ -18,7 +18,7 @@ where
     /// Queryable for host discovery
     pub(crate) queryable: Option<Arc<crate::network::HostQueryable>>,
     /// Multinode liveliness watch to detect any client disconnect
-    pub(crate) client_liveliness_watch: crate::network::NodeLivelinessWatch,
+    pub(crate) client_liveliness_watch: crate::network::NodeLivelinessWatch<KeyexprClient>,
     /// Current game state from the engine
     pub(crate) game_state: Option<E::State>,
 }

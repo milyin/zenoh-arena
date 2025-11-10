@@ -263,7 +263,7 @@ where
         let queryable = HostQueryable::declare(session, prefix.clone(), node_id.clone()).await?;
 
         // Create multinode liveliness watch for monitoring connected clients
-        let client_liveliness_watch = NodeLivelinessWatch::new(node_id.clone());
+        let client_liveliness_watch = NodeLivelinessWatch::<KeyexprClient>::new();
 
         *self = NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
@@ -293,7 +293,7 @@ where
         let prefix = prefix.into();
 
         // Create and subscribe to liveliness events for the host
-        let mut liveliness_watch = NodeLivelinessWatch::new(host_id.clone());
+        let mut liveliness_watch = NodeLivelinessWatch::<KeyexprHost>::new();
         let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(host_id.clone()));
         liveliness_watch
             .subscribe(session, host_keyexpr)

@@ -59,51 +59,54 @@ impl NodeLivelinessToken {
     }
 }
 
-/// Watches for liveliness of a specific host node
+/// Watches for liveliness of nodes matching a keyexpr pattern
 ///
-/// Subscribes to liveliness events for a host and detects when the host goes offline.
+/// Subscribes to liveliness events and detects when nodes go offline.
 /// Provides a `subscribe()` method to add subscribers and an `unsubscribe()` method to remove them.
 /// The `disconnected()` method waits for any subscriber's disconnect using `select_all`.
 ///
-/// This is used by clients to detect when their connected host goes offline and needs
-/// to return to the host search stage.
-pub struct NodeLivelinessWatch {
-    subscribers: Vec<(
-        NodeId,
-        zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
-    )>,
-    host_id: NodeId,
+/// This is used by:
+/// - Clients to detect when their connected host goes offline (specific node_id)
+/// - Hosts to detect when any client disconnects (wildcard pattern)
+///
+/// Type parameter `K` must implement `KeyexprNodeTrait` and can be parsed from received samples
+/// to extract the node ID.
+pub struct NodeLivelinessWatch<K: KeyexprNodeTrait> {
+    subscribers: Vec<zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>>,
+    _phantom: std::marker::PhantomData<K>,
 }
 
-impl std::fmt::Debug for NodeLivelinessWatch {
+impl<K: KeyexprNodeTrait> std::fmt::Debug for NodeLivelinessWatch<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeLivelinessWatch")
-            .field("host_id", &self.host_id)
             .field("num_subscribers", &self.subscribers.len())
             .finish()
     }
 }
 
-impl NodeLivelinessWatch {
-    /// Create a new liveliness watch for a node without any subscribers
-    pub fn new(node_id: NodeId) -> Self {
+impl<K: KeyexprNodeTrait> NodeLivelinessWatch<K> {
+    /// Create a new liveliness watch without any subscribers
+    pub fn new() -> Self {
         Self {
             subscribers: Vec::new(),
-            host_id: node_id,
+            _phantom: std::marker::PhantomData,
         }
     }
 
-    /// Subscribe to liveliness events for a node
+    /// Subscribe to liveliness events for nodes matching the keyexpr
     ///
-    /// Adds a new liveliness subscriber that tracks the presence of the specified node.
-    /// The subscriber will receive events when the node's liveliness token is declared or undeclared.
+    /// Adds a new liveliness subscriber that tracks the presence of nodes matching the specified keyexpr.
+    /// The subscriber will receive events when matching nodes' liveliness tokens are declared or undeclared.
     /// Multiple subscribers can be added via repeated calls to this method.
-    pub async fn subscribe<K: KeyexprNodeTrait>(
+    ///
+    /// The keyexpr can be:
+    /// - Specific: with node_id() returning Some(id) to track a single node
+    /// - Wildcard: with node_id() returning None to track all nodes matching the pattern
+    pub async fn subscribe(
         &mut self,
         session: &zenoh::Session,
         keyexpr: K,
     ) -> Result<()> {
-        let node_id = keyexpr.node_id().clone().expect("node_id must be specified for liveliness subscription");
         let keyexpr: KeyExpr = keyexpr.to_keyexpr();
 
         let subscriber = session
@@ -113,7 +116,7 @@ impl NodeLivelinessWatch {
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
 
-        self.subscribers.push((node_id, subscriber));
+        self.subscribers.push(subscriber);
         Ok(())
     }
 
@@ -129,11 +132,16 @@ impl NodeLivelinessWatch {
     /// Wait for any subscriber to disconnect (liveliness lost)
     ///
     /// Uses `select_all` to wait for any of the subscribers to receive a "Delete" event,
-    /// indicating the host's liveliness token has been dropped and the host is
+    /// indicating a node's liveliness token has been dropped and the node is
     /// no longer available. This method returns when any subscriber detects disconnection.
     ///
+    /// The node ID is extracted by parsing the sample's keyexpr as type K.
+    ///
     /// Returns the node ID that disconnected.
-    pub async fn disconnected(&mut self) -> Result<NodeId> {
+    pub async fn disconnected(&mut self) -> Result<NodeId>
+    where
+        K: TryFrom<KeyExpr<'static>, Error = crate::error::ArenaError>,
+    {
         if self.subscribers.is_empty() {
             return Err(crate::error::ArenaError::LivelinessError(
                 "No subscribers registered for liveliness watch".into(),
@@ -144,12 +152,35 @@ impl NodeLivelinessWatch {
         let futures_vec: Vec<_> = self
             .subscribers
             .iter_mut()
-            .map(|(node_id, subscriber)| {
-                let node_id = node_id.clone();
+            .map(|subscriber| {
                 Box::pin(async move {
                     loop {
                         match subscriber.recv_async().await {
                             Ok(sample) => {
+                                // Extract node_id from the sample's keyexpr by parsing it as type K
+                                let keyexpr_k = match K::try_from(sample.key_expr().clone().into_owned()) {
+                                    Ok(k) => k,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "Failed to parse keyexpr '{}': {}",
+                                            sample.key_expr(),
+                                            e
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                let node_id = match keyexpr_k.node_id() {
+                                    Some(id) => id.clone(),
+                                    None => {
+                                        tracing::warn!(
+                                            "Received sample with wildcard node_id in keyexpr '{}'",
+                                            sample.key_expr()
+                                        );
+                                        continue;
+                                    }
+                                };
+
                                 match sample.kind() {
                                     SampleKind::Delete => {
                                         // Node went offline, liveliness lost
@@ -157,7 +188,7 @@ impl NodeLivelinessWatch {
                                             "Node '{}' liveliness lost - disconnecting",
                                             node_id
                                         );
-                                        return Ok(node_id.clone());
+                                        return Ok(node_id);
                                     }
                                     SampleKind::Put => {
                                         // Node came online or re-established liveliness, continue waiting
@@ -171,12 +202,12 @@ impl NodeLivelinessWatch {
                             }
                             Err(e) => {
                                 tracing::warn!(
-                                    "Liveliness subscription error for node '{}': {}",
-                                    node_id,
+                                    "Liveliness subscription error: {}",
                                     e
                                 );
-                                // Subscription error is treated as disconnect
-                                return Ok(node_id.clone());
+                                // Subscription error - we cannot extract node_id without a sample
+                                // Continue to next iteration
+                                continue;
                             }
                         }
                     }
@@ -187,12 +218,6 @@ impl NodeLivelinessWatch {
         // Wait for any future to complete
         let (result, _index, _remaining) = select_all(futures_vec).await;
         result
-    }
-
-    /// Get the host ID being watched
-    #[allow(dead_code)]
-    pub fn host_id(&self) -> &NodeId {
-        &self.host_id
     }
 
     /// Check if there are any subscribers registered
