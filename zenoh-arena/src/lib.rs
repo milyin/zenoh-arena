@@ -58,6 +58,9 @@ pub mod config;
 pub mod error;
 pub(crate) mod network;
 pub mod node;
+pub(crate) mod client_state;
+pub(crate) mod host_state;
+pub(crate) mod searching_host_state;
 pub mod session_ext;
 pub mod types;
 

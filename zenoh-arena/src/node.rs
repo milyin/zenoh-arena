@@ -1,10 +1,8 @@
 /// Node management module
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
-use crate::network::host_queryable::HostRequest;
-use crate::network::{HostQueryable, NodeLivelinessToken};
-use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
-use std::sync::Arc;
+use crate::network::NodeLivelinessToken;
+use crate::types::{NodeId, NodeStateInternal, NodeStatus};
 
 /// Commands that can be sent to the node
 #[derive(Debug, Clone)]
@@ -132,451 +130,37 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             ));
         }
 
-        // Dispatch based on current state
-        match self.state {
-            NodeStateInternal::SearchingHost => self.search_for_host().await,
-            NodeStateInternal::Client { .. } => self.process_client().await,
-            NodeStateInternal::Host { .. } => self.process_host().await,
-        }
-    }
-
-    /// Process actions when in Client state
-    ///
-    /// Handles commands from the command channel while connected to a host.
-    /// Monitors liveliness of the connected host and returns to SearchingHost if disconnected.
-    /// Returns when either:
-    /// - Host liveliness is lost (transitions back to SearchingHost)
-    /// - The step timeout elapses
-    /// - A Stop command is received (returns None)
-    async fn process_client(&mut self) -> Result<Option<NodeStatus<E::State>>> {
-        // Extract the client state data temporarily to use the liveliness watch
-        let (host_id, mut liveliness_watch, _liveliness_token) =
-            match std::mem::take(&mut self.state) {
-                NodeStateInternal::Client {
-                    host_id,
-                    liveliness_watch,
-                    liveliness_token,
-                } => (host_id, liveliness_watch, liveliness_token),
-                other_state => {
-                    // Restore state if it wasn't Client
-                    self.state = other_state;
-                    return Ok(Some(NodeStatus {
-                        state: NodeState::from(&self.state),
-                        game_state: None,
-                    }));
-                }
-            };
-
-        let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
-
-        // Process commands until timeout, shutdown, or host disconnection
-        loop {
-            tokio::select! {
-                // Timeout elapsed
-                () = &mut sleep => {
-                    // No disconnection yet, restore state and return
-                    self.state = NodeStateInternal::Client {
-                        host_id: host_id.clone(),
-                        liveliness_watch,
-                        liveliness_token: _liveliness_token,
-                    };
-                    return Ok(Some(NodeStatus {
-                        state: NodeState::from(&self.state),
-                        game_state: None,
-                    }));
-                }
-                // Host liveliness lost - disconnect and return to searching
-                disconnect_result = liveliness_watch.disconnected() => {
-                    match disconnect_result {
-                        Ok(disconnected_id) => {
-                            tracing::info!("Node '{}' detected host '{}' disconnection, returning to search", self.id, disconnected_id);
-                            // Transition back to SearchingHost
-                            self.state = NodeStateInternal::SearchingHost;
-                            return Ok(Some(NodeStatus {
-                                state: NodeState::from(&self.state),
-                                game_state: None,
-                            }));
-                        }
-                        Err(e) => {
-                            tracing::warn!("Node '{}' liveliness error: {}", self.id, e);
-                            // Treat error as disconnect
-                            self.state = NodeStateInternal::SearchingHost;
-                            return Ok(Some(NodeStatus {
-                                state: NodeState::from(&self.state),
-                                game_state: None,
-                            }));
-                        }
-                    }
-                }
-                // Command received
-                result = self.command_rx.recv_async() => match result {
-                    Err(_) => {
-                        tracing::info!("Node '{}' command channel closed", self.id);
-                        return Ok(None);
-                    }
-                    Ok(NodeCommand::Stop) => {
-                        tracing::info!("Node '{}' received Stop command, exiting", self.id);
-                        return Ok(None);
-                    }
-                    Ok(NodeCommand::GameAction(_action)) => {
-                        tracing::debug!(
-                            "Node '{}' forwarding action to host '{}'",
-                            self.id,
-                            host_id
-                        );
-                        // TODO: Forward action to remote host via Zenoh pub/sub
-                        // Placeholder for Phase 4 implementation
-                        // Continue the loop
-                        continue;
-                    }
-                }
+        // Dispatch based on current state using state-specific run methods
+        match &self.state {
+            NodeStateInternal::SearchingHost => {
+                use crate::searching_host_state::SearchingHostState;
+                let searching_state = SearchingHostState;
+                searching_state
+                    .run(
+                        &mut self.state,
+                        &self.session,
+                        &self.config,
+                        &self.id,
+                        &self.command_rx,
+                        &self.get_engine,
+                    )
+                    .await
+            }
+            NodeStateInternal::Client { .. } => {
+                use crate::client_state::ClientState;
+                let client_state = ClientState;
+                client_state
+                    .run(&mut self.state, &self.config, &self.id, &self.command_rx)
+                    .await
+            }
+            NodeStateInternal::Host { .. } => {
+                use crate::host_state::HostState;
+                let host_state = HostState;
+                host_state
+                    .run(&mut self.state, &self.config, &self.id, &self.session, &self.command_rx)
+                    .await
             }
         }
-    }
-
-    /// Process actions when in Host state
-    ///
-    /// Handles commands from the command channel and processes game actions through the engine.
-    /// Also monitors client liveliness to detect disconnections.
-    /// Returns when either:
-    /// - A new game state is produced by the engine
-    /// - The step timeout elapses
-    /// - A Stop command is received (returns None)
-    /// - A client disconnects (handled and continues loop)
-    async fn process_host(&mut self) -> Result<Option<NodeStatus<E::State>>> {
-        let timeout = tokio::time::Duration::from_millis(self.config.step_timeout_ms);
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
-
-        // Process commands until timeout or new state
-        loop {
-            // Snapshot queryable and whether we have clients to monitor
-            let (queryable_arc, has_clients) = match &self.state {
-                NodeStateInternal::Host {
-                    queryable,
-                    client_liveliness_watch,
-                    ..
-                } => (queryable.clone(), client_liveliness_watch.has_subscribers()),
-                _ => {
-                    return Ok(Some(NodeStatus {
-                        state: NodeState::from(&self.state),
-                        game_state: None,
-                    }));
-                }
-            };
-
-            tokio::select! {
-                // Timeout elapsed
-                () = &mut sleep => {
-                    return Ok(Some(NodeStatus {
-                        state: NodeState::from(&self.state),
-                        game_state: None,
-                    }));
-                }
-                // Query received from a client (connection request)
-                request_result = async {
-                    let queryable = queryable_arc.clone().expect("queryable available");
-                    queryable.expect_connection().await
-                }, if queryable_arc.is_some() => {
-                    if let Ok(request) = request_result {
-                        self.handle_connection_request(request).await?;
-                    }
-                }
-                // Client disconnect detected via liveliness watch
-                disconnect_result = async {
-                    if let NodeStateInternal::Host {
-                        client_liveliness_watch,
-                        ..
-                    } = &mut self.state
-                    {
-                        client_liveliness_watch.disconnected().await
-                    } else {
-                        futures::future::pending().await
-                    }
-                }, if has_clients => {
-                    if let Ok(disconnected_id) = disconnect_result {
-                        self.handle_client_disconnect(disconnected_id).await?;
-                    }
-                }
-                // Command received
-                result = self.command_rx.recv_async() => match result {
-                    Err(_) => {
-                        tracing::info!("Node '{}' command channel closed", self.id);
-                        return Ok(None);
-                    }
-                    Ok(NodeCommand::Stop) => {
-                        tracing::info!("Node '{}' received Stop command, exiting", self.id);
-                        return Ok(None);
-                    }
-                    Ok(NodeCommand::GameAction(action)) => {
-                        if let NodeStateInternal::Host { engine, .. } = &mut self.state {
-                            tracing::debug!(
-                                "Node '{}' processing action in host mode",
-                                self.id
-                            );
-                            // Process action directly in the engine and get new state
-                            let new_game_state = engine.process_action(action, &self.id)?;
-                            // Build the node state info using From trait
-                            return Ok(Some(NodeStatus {
-                                state: NodeState::from(&self.state),
-                                game_state: Some(new_game_state),
-                            }));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Search for available hosts and attempt to connect
-    ///
-    /// Uses NodeQuerier to find and connect to available hosts. If timeout expires or
-    /// no hosts are available/accept connection, transitions to Host state.
-    async fn search_for_host(&mut self) -> Result<Option<NodeStatus<E::State>>> {
-        use crate::network::HostQuerier;
-
-        tracing::info!("Node '{}' searching for hosts...", self.id);
-
-        let search_timeout = tokio::time::Duration::from_millis(self.config.search_timeout_ms);
-        let sleep = tokio::time::sleep(search_timeout);
-        tokio::pin!(sleep);
-
-        // Wait for connection success or timeout
-        // Returns None if should become host, Some(host_id) if connected
-        let connected_host = loop {
-            tokio::select! {
-                // Search timeout elapsed - no successful connection, become host
-                () = &mut sleep => {
-                    tracing::info!(
-                        "Node '{}' search timeout - no hosts accepted connection",
-                        self.id
-                    );
-                    break None;
-                }
-                // Try to connect to available hosts
-                connection_result = HostQuerier::connect(&self.session, self.config.keyexpr_prefix.clone(), self.id.clone()) => {
-                    match connection_result {
-                        Ok(Some(host_id)) => {
-                            // Successfully connected to a host
-                            tracing::info!("Node '{}' connected to host: {}", self.id, host_id);
-                            break Some(host_id);
-                        }
-                        Ok(None) => {
-                            // No hosts available, become host
-                            tracing::info!("Node '{}' no hosts available", self.id);
-                            break None;
-                        }
-                        Err(e) => {
-                            tracing::warn!("Node '{}' query error during search: {}", self.id, e);
-                            return Err(e);
-                        }
-                    }
-                }
-                // Check for Stop command while searching
-                result = self.command_rx.recv_async() => match result {
-                    Err(_) => {
-                        tracing::info!("Node '{}' command channel closed during search", self.id);
-                        return Ok(None);
-                    }
-                    Ok(NodeCommand::Stop) => {
-                        tracing::info!("Node '{}' received Stop command during search, exiting", self.id);
-                        return Ok(None);
-                    }
-                    Ok(NodeCommand::GameAction(_)) => {
-                        tracing::warn!(
-                            "Node '{}' received action while searching for host, ignoring",
-                            self.id
-                        );
-                        // Continue searching
-                    }
-                }
-            }
-        };
-
-        // Handle connection result - state transition after select!
-        if let Some(host_id) = connected_host {
-            self.state
-                .client(
-                    &self.session,
-                    self.config.keyexpr_prefix.clone(),
-                    host_id,
-                    self.id.clone(),
-                )
-                .await?;
-            Ok(Some(NodeStatus {
-                state: NodeState::from(&self.state),
-                game_state: None,
-            }))
-        } else {
-            self.state
-                .host(
-                    (self.get_engine)(),
-                    &self.session,
-                    self.config.keyexpr_prefix.clone(),
-                    &self.id,
-                )
-                .await?;
-            Ok(Some(NodeStatus {
-                state: NodeState::from(&self.state),
-                game_state: None,
-            }))
-        }
-    }
-
-    /// Handle a connection request from a client
-    ///
-    /// Checks if the node is in host mode and if the current client count is below the maximum.
-    /// Accepts the connection if capacity is available, otherwise rejects it.
-    async fn handle_connection_request(&mut self, request: HostRequest) -> Result<()> {
-        let NodeStateInternal::Host {
-            engine,
-            connected_clients,
-            queryable,
-            client_liveliness_watch,
-            ..
-        } = &mut self.state
-        else {
-            tracing::warn!(
-                "Node '{}' received connection request but not in host mode",
-                self.id
-            );
-            return Ok(());
-        };
-
-        let current_count = connected_clients.len();
-        let max_allowed = engine.max_clients();
-
-        let should_accept = max_allowed.map(|max| current_count < max).unwrap_or(true); // Accept if no limit
-
-        if should_accept {
-            match request.accept().await {
-                Ok(client_id) => {
-                    tracing::info!(
-                        "Node '{}' accepted connection from client '{}' ({}/{})",
-                        self.id,
-                        client_id,
-                        connected_clients.len() + 1,
-                        max_allowed
-                            .map(|m| m.to_string())
-                            .unwrap_or_else(|| "unlimited".to_string())
-                    );
-                    // Track accepted client
-                    connected_clients.push(client_id.clone());
-
-                    // Subscribe to liveliness events for the client so we can detect disconnects
-                    match client_liveliness_watch
-                        .subscribe(
-                            &self.session,
-                            self.config.keyexpr_prefix.clone(),
-                            crate::network::Role::Client,
-                            &client_id,
-                        )
-                        .await
-                    {
-                        Ok(()) => {
-                            tracing::debug!(
-                                "Node '{}' subscribed to liveliness for client '{}'",
-                                self.id,
-                                client_id
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Node '{}' failed to subscribe to liveliness for client '{}': {}",
-                                self.id,
-                                client_id,
-                                e
-                            );
-                        }
-                    }
-
-                    // Update queryable if we've reached capacity
-                    let new_count = connected_clients.len();
-                    let has_capacity = match max_allowed {
-                        None => true, // Unlimited clients
-                        Some(max_count) => new_count < max_count,
-                    };
-
-                    if !has_capacity && queryable.is_some() {
-                        *queryable = None;
-                        tracing::debug!("Host '{}' capacity reached (dropped queryable)", self.id);
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Node '{}' failed to accept connection: {:?}", self.id, e);
-                }
-            }
-        } else {
-            tracing::info!(
-                "Node '{}' rejected connection from client '{}' (limit reached: {}/{})",
-                self.id,
-                request.client_id().as_str(),
-                current_count,
-                max_allowed.unwrap_or(0)
-            );
-            if let Err(e) = request.reject("Maximum number of clients reached").await {
-                tracing::warn!("Node '{}' failed to reject connection: {:?}", self.id, e);
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
-    async fn handle_client_disconnect(
-        &mut self,
-        disconnected_id: NodeId,
-    ) -> Result<()> {
-        let NodeStateInternal::Host {
-            connected_clients,
-            queryable,
-            engine,
-            ..
-        } = &mut self.state
-        else {
-            return Ok(());
-        };
-
-        tracing::info!(
-            "Node '{}' detected client '{}' disconnect",
-            self.id,
-            disconnected_id
-        );
-
-        let removed = if let Some(pos) = connected_clients.iter().position(|id| id == &disconnected_id) {
-            connected_clients.remove(pos);
-            true
-        } else {
-            false
-        };
-
-        if !removed {
-            tracing::debug!(
-                "Node '{}' received disconnect for unknown client '{}'",
-                self.id,
-                disconnected_id
-            );
-        }
-
-        let has_capacity = match engine.max_clients() {
-            None => true,
-            Some(max) => connected_clients.len() < max,
-        };
-
-        if has_capacity && queryable.is_none() {
-            let new_queryable = HostQueryable::declare(
-                &self.session,
-                self.config.keyexpr_prefix.clone(),
-                self.id.clone(),
-            )
-            .await?;
-            *queryable = Some(Arc::new(new_queryable));
-            tracing::debug!("Host '{}' resumed accepting clients", self.id);
-        }
-
-        Ok(())
     }
 }
 
@@ -725,27 +309,17 @@ mod tests {
 
         let command_tx = node.sender();
 
-        // Spawn step loop in background
-        let step_handle = tokio::spawn(async move {
-            loop {
-                match node.step().await {
-                    Ok(Some(_status)) => {
-                        // Continue stepping
-                    }
-                    Ok(None) => {
-                        // Stop command received
-                        break Ok(());
-                    }
-                    Err(e) => break Err(e),
-                }
-            }
-        });
+        // Test one step first
+        let status = node.step().await.unwrap();
+        assert!(status.is_some());
 
-        // Send Stop command to exit the loop
+        // Send Stop command via async channel
         command_tx.send(NodeCommand::Stop).unwrap();
 
-        let result: Result<()> = step_handle.await.unwrap();
+        // Execute the next step which should return None due to Stop command
+        let result = node.step().await;
         assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
