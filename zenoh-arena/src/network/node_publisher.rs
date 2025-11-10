@@ -31,20 +31,21 @@ where
     /// Create a new publisher for a Link keyexpr
     ///
     /// Immediately declares a Zenoh publisher for the link keyexpr constructed from
-    /// the given prefix, own node ID, and remote node ID. The keyexpr pattern will be:
-    /// `<prefix>/link/<own_id>/<remote_id>` to send messages to the specified remote node.
+    /// the given prefix, sender node ID, and receiver node ID. The keyexpr pattern will be:
+    /// `<prefix>/link/<sender_id>/<receiver_id>` (node_a: sender_id, node_b: receiver_id)
+    /// to send messages to the specified remote node.
     pub async fn new(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
-        own_id: &NodeId,
-        remote_id: &NodeId,
+        sender_id: &NodeId,
+        receiver_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/link/<own_id>/<remote_id>
+        // Construct Link keyexpr: <prefix>/link/<sender_id>/<receiver_id> (node_a=sender_id, node_b=receiver_id)
         let node_keyexpr = NodeKeyexpr::new(
             prefix,
             Role::Link,
-            Some(own_id.clone()),
-            Some(remote_id.clone()),
+            Some(sender_id.clone()),
+            Some(receiver_id.clone()),
         );
         let keyexpr: KeyExpr = node_keyexpr.into();
 

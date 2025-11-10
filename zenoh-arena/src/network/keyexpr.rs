@@ -7,15 +7,15 @@ use zenoh::key_expr::KeyExpr;
 /// Role type for keyexpr
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
-    /// Node role - `<prefix>/node/<own_id>`
+    /// Node role - `<prefix>/node/<node_id>` (node_a: node_id)
     Node,
-    /// Host role - `<prefix>/host/<own_id>`
+    /// Host role - `<prefix>/host/<host_id>` (node_a: host_id)
     Host,
-    /// Client role - `<prefix>/client/<own_id>`
+    /// Client role - `<prefix>/client/<client_id>` (node_a: client_id)
     Client,
-    /// Shake role - `<prefix>/shake/<own_id>/<remote_id>` (for handshake)
+    /// Shake role - `<prefix>/shake/<host_id>/<client_id>` (node_a: host_id, node_b: client_id)
     Shake,
-    /// Link role - `<prefix>/link/<own_id>/<remote_id>` (for data communication)
+    /// Link role - `<prefix>/link/<sender_id>/<receiver_id>` (node_a: sender_id, node_b: receiver_id)
     Link,
 }
 
@@ -43,7 +43,7 @@ impl Role {
         }
     }
 
-    /// Whether this role can have remote_id (only Shake and Link do)
+    /// Whether this role can have node_b (only Shake and Link do)
     pub fn has_remote_id(&self) -> bool {
         matches!(self, Role::Shake | Role::Link)
     }
@@ -51,16 +51,16 @@ impl Role {
 
 /// Unified keyexpr for nodes, hosts, clients, and links
 ///
-/// Pattern: `<prefix>/<role>/<own_id>` (for Node, Host, Client with specific IDs)
+/// Pattern: `<prefix>/<role>/<node_a>` (for Node, Host, Client with specific IDs)
 /// Pattern: `<prefix>/<role>/*` (for Node, Host, Client with wildcards)
-/// Pattern: `<prefix>/shake/<own_id>/<remote_id>` (for Shake with specific IDs)
-/// Pattern: `<prefix>/link/<own_id>/<remote_id>` (for Link with specific IDs)
+/// Pattern: `<prefix>/shake/<node_a>/<node_b>` (for Shake: host_id/client_id)
+/// Pattern: `<prefix>/link/<node_a>/<node_b>` (for Link: sender_id/receiver_id)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeKeyexpr {
     prefix: KeyExpr<'static>,
     role: Role,
-    own_id: Option<NodeId>,
-    remote_id: Option<NodeId>,
+    node_a: Option<NodeId>,
+    node_b: Option<NodeId>,
 }
 
 impl NodeKeyexpr {
@@ -68,18 +68,18 @@ impl NodeKeyexpr {
     pub fn new<P: Into<KeyExpr<'static>>>(
         prefix: P,
         role: Role,
-        own_id: Option<NodeId>,
-        remote_id: Option<NodeId>,
+        node_a: Option<NodeId>,
+        node_b: Option<NodeId>,
     ) -> Self {
-        // Validate: remote_id is only for Shake and Link roles
-        if !role.has_remote_id() && remote_id.is_some() {
-            panic!("remote_id can only be used with Shake or Link role");
+        // Validate: node_b is only for Shake and Link roles
+        if !role.has_remote_id() && node_b.is_some() {
+            panic!("node_b can only be used with Shake or Link role");
         }
         Self {
             prefix: prefix.into(),
             role,
-            own_id,
-            remote_id,
+            node_a,
+            node_b,
         }
     }
 
@@ -93,14 +93,21 @@ impl NodeKeyexpr {
         self.role
     }
 
-    /// Get the own ID (None means wildcard)
-    pub fn own_id(&self) -> &Option<NodeId> {
-        &self.own_id
+    /// Get node_a (None means wildcard)
+    /// - Node: node_id
+    /// - Host: host_id
+    /// - Client: client_id
+    /// - Shake: host_id
+    /// - Link: sender_id
+    pub fn node_a(&self) -> &Option<NodeId> {
+        &self.node_a
     }
 
-    /// Get the remote ID (only for Shake and Link roles, None means wildcard)
-    pub fn remote_id(&self) -> &Option<NodeId> {
-        &self.remote_id
+    /// Get node_b (only for Shake and Link roles, None means wildcard)
+    /// - Shake: client_id
+    /// - Link: receiver_id
+    pub fn node_b(&self) -> &Option<NodeId> {
+        &self.node_b
     }
 }
 
@@ -110,8 +117,8 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
     fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
         let parts: Vec<&str> = keyexpr.as_str().split('/').collect();
 
-        // Expected pattern: [...prefix]/<role>/<own_id>[/<remote_id>]
-        // At minimum: prefix, role, own_id (3 parts total if we count parts as separate)
+        // Expected pattern: [...prefix]/<role>/<node_a>[/<node_b>]
+        // At minimum: prefix, role, node_a (3 parts total if we count parts as separate)
         // For "arena/game1/host/host1" we have parts: ["arena", "game1", "host", "host1"]
         if parts.len() < 3 {
             return Err(ArenaError::InvalidKeyexpr(format!(
@@ -121,27 +128,27 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
         }
 
         // Try to determine the role by looking backwards
-        // For Shake/Link: [...prefix]/shake|link/<own_id>/<remote_id> - at least 4 parts
-        // For others: [...prefix]/<role>/<own_id> - at least 3 parts
+        // For Shake/Link: [...prefix]/shake|link/<node_a>/<node_b> - at least 4 parts
+        // For others: [...prefix]/<role>/<node_a> - at least 3 parts
 
         // First, try to interpret as Shake/Link (4 parts minimum)
         if parts.len() >= 4 {
             let possible_role_str = parts[parts.len() - 3];
             if let Some(role) = Role::from_str(possible_role_str) {
                 if role.has_remote_id() {
-                    // This is a Shake/Link with 4+ parts: [...prefix]/shake|link/<own_id>/<remote_id>
-                    let own_id_str = parts[parts.len() - 2];
-                    let remote_id_str = parts[parts.len() - 1];
+                    // This is a Shake/Link with 4+ parts: [...prefix]/shake|link/<node_a>/<node_b>
+                    let node_a_str = parts[parts.len() - 2];
+                    let node_b_str = parts[parts.len() - 1];
 
-                    let own_id = if own_id_str == "*" {
+                    let node_a = if node_a_str == "*" {
                         None
                     } else {
-                        Some(NodeId::from_name(own_id_str.to_string())?)
+                        Some(NodeId::from_name(node_a_str.to_string())?)
                     };
-                    let remote_id = if remote_id_str == "*" {
+                    let node_b = if node_b_str == "*" {
                         None
                     } else {
-                        Some(NodeId::from_name(remote_id_str.to_string())?)
+                        Some(NodeId::from_name(node_b_str.to_string())?)
                     };
 
                     let prefix_str = parts[..parts.len() - 3].join("/");
@@ -150,14 +157,14 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
                     return Ok(Self {
                         prefix,
                         role,
-                        own_id,
-                        remote_id,
+                        node_a,
+                        node_b,
                     });
                 }
             }
         }
 
-        // Otherwise, interpret as 3-part pattern: [...prefix]/<role>/<own_id>
+        // Otherwise, interpret as 3-part pattern: [...prefix]/<role>/<node_a>
         let role_str = parts[parts.len() - 2];
         let role = Role::from_str(role_str).ok_or_else(|| {
             ArenaError::InvalidKeyexpr(format!(
@@ -169,16 +176,16 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
 
         if role.has_remote_id() {
             return Err(ArenaError::InvalidKeyexpr(format!(
-                "Shake/Link role requires remote_id in keyexpr: {}",
+                "Shake/Link role requires node_b in keyexpr: {}",
                 keyexpr.as_str()
             )));
         }
 
-        let own_id_str = parts[parts.len() - 1];
-        let own_id = if own_id_str == "*" {
+        let node_a_str = parts[parts.len() - 1];
+        let node_a = if node_a_str == "*" {
             None
         } else {
-            Some(NodeId::from_name(own_id_str.to_string())?)
+            Some(NodeId::from_name(node_a_str.to_string())?)
         };
 
         let prefix_str = parts[..parts.len() - 2].join("/");
@@ -187,8 +194,8 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
         Ok(Self {
             prefix,
             role,
-            own_id,
-            remote_id: None,
+            node_a,
+            node_b: None,
         })
     }
 }
@@ -196,12 +203,12 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
 impl From<NodeKeyexpr> for KeyExpr<'static> {
     fn from(keyexpr: NodeKeyexpr) -> Self {
         let keyexpr_str = if keyexpr.role.has_remote_id() {
-            // Shake/Link role: <prefix>/shake|link/<own_id>/<remote_id>
-            let own_id_str = match &keyexpr.own_id {
+            // Shake/Link role: <prefix>/shake|link/<node_a>/<node_b>
+            let node_a_str = match &keyexpr.node_a {
                 Some(id) => id.as_str().to_string(),
                 None => "*".to_string(),
             };
-            let remote_id_str = match &keyexpr.remote_id {
+            let node_b_str = match &keyexpr.node_b {
                 Some(id) => id.as_str().to_string(),
                 None => "*".to_string(),
             };
@@ -209,12 +216,12 @@ impl From<NodeKeyexpr> for KeyExpr<'static> {
                 "{}/{}/{}/{}",
                 keyexpr.prefix.as_str(),
                 keyexpr.role.as_str(),
-                own_id_str,
-                remote_id_str
+                node_a_str,
+                node_b_str
             )
         } else {
-            // Other roles: <prefix>/<role>/<own_id>
-            let own_id_str = match &keyexpr.own_id {
+            // Other roles: <prefix>/<role>/<node_a>
+            let node_a_str = match &keyexpr.node_a {
                 Some(id) => id.as_str().to_string(),
                 None => "*".to_string(),
             };
@@ -222,7 +229,7 @@ impl From<NodeKeyexpr> for KeyExpr<'static> {
                 "{}/{}/{}",
                 keyexpr.prefix.as_str(),
                 keyexpr.role.as_str(),
-                own_id_str
+                node_a_str
             )
         };
         KeyExpr::try_from(keyexpr_str).unwrap().into_owned()
@@ -236,71 +243,71 @@ mod tests {
     #[test]
     fn test_link_keyexpr_creation() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let own_id = NodeId::from_name("host1".to_string()).unwrap();
-        let remote_id = NodeId::from_name("client1".to_string()).unwrap();
+        let node_a = NodeId::from_name("host1".to_string()).unwrap();
+        let node_b = NodeId::from_name("client1".to_string()).unwrap();
 
         let link_keyexpr = NodeKeyexpr::new(
             prefix,
             Role::Link,
-            Some(own_id.clone()),
-            Some(remote_id.clone()),
+            Some(node_a.clone()),
+            Some(node_b.clone()),
         );
-        assert_eq!(link_keyexpr.own_id(), &Some(own_id));
-        assert_eq!(link_keyexpr.remote_id(), &Some(remote_id));
+        assert_eq!(link_keyexpr.node_a(), &Some(node_a));
+        assert_eq!(link_keyexpr.node_b(), &Some(node_b));
         assert_eq!(link_keyexpr.prefix().as_str(), "arena/game1");
     }
 
     #[test]
     fn test_link_keyexpr_roundtrip() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let own_id = NodeId::from_name("host1".to_string()).unwrap();
-        let remote_id = NodeId::from_name("client1".to_string()).unwrap();
+        let node_a = NodeId::from_name("host1".to_string()).unwrap();
+        let node_b = NodeId::from_name("client1".to_string()).unwrap();
 
         let link_keyexpr = NodeKeyexpr::new(
             prefix,
             Role::Link,
-            Some(own_id.clone()),
-            Some(remote_id.clone()),
+            Some(node_a.clone()),
+            Some(node_b.clone()),
         );
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/client1");
 
         let parsed = NodeKeyexpr::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.own_id(), &Some(own_id));
-        assert_eq!(parsed.remote_id(), &Some(remote_id));
+        assert_eq!(parsed.node_a(), &Some(node_a));
+        assert_eq!(parsed.node_b(), &Some(node_b));
         assert_eq!(parsed.role(), Role::Link);
     }
 
     #[test]
     fn test_link_keyexpr_wildcard_remote() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let own_id = NodeId::from_name("host1".to_string()).unwrap();
+        let node_a = NodeId::from_name("host1".to_string()).unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, Some(own_id.clone()), None);
+        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, Some(node_a.clone()), None);
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/*");
 
         let parsed = NodeKeyexpr::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.own_id(), &Some(own_id));
-        assert_eq!(parsed.remote_id(), &None);
+        assert_eq!(parsed.node_a(), &Some(node_a));
+        assert_eq!(parsed.node_b(), &None);
         assert_eq!(parsed.role(), Role::Link);
     }
 
     #[test]
     fn test_link_keyexpr_wildcard_own() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let remote_id = NodeId::from_name("client1".to_string()).unwrap();
+        let node_b = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, None, Some(remote_id.clone()));
+        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, None, Some(node_b.clone()));
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/*/client1");
 
         let parsed = NodeKeyexpr::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.own_id(), &None);
-        assert_eq!(parsed.remote_id(), &Some(remote_id));
+        assert_eq!(parsed.node_a(), &None);
+        assert_eq!(parsed.node_b(), &Some(node_b));
         assert_eq!(parsed.role(), Role::Link);
     }
 
@@ -314,8 +321,8 @@ mod tests {
         assert_eq!(keyexpr.as_str(), "arena/game1/link/*/*");
 
         let parsed = NodeKeyexpr::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.own_id(), &None);
-        assert_eq!(parsed.remote_id(), &None);
+        assert_eq!(parsed.node_a(), &None);
+        assert_eq!(parsed.node_b(), &None);
         assert_eq!(parsed.role(), Role::Link);
     }
 

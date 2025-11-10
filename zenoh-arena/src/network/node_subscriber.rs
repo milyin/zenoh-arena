@@ -32,13 +32,14 @@ where
     ///
     /// Immediately declares a Zenoh subscriber for the link keyexpr constructed from
     /// the given prefix and node ID. The keyexpr pattern will be:
-    /// `<prefix>/link/<node_id>/*` to receive all messages for the specified node.
+    /// `<prefix>/link/<node_id>/*` (node_a: sender_id=node_id, node_b: receiver_id=wildcard)
+    /// to receive all messages for the specified node (as sender).
     pub async fn new(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/link/<node_id>/*
+        // Construct Link keyexpr: <prefix>/link/<node_id>/* (node_a=sender_id, node_b=receiver_id=*)
         let node_keyexpr = NodeKeyexpr::new(prefix, Role::Link, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
 

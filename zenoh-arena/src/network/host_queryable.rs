@@ -43,7 +43,7 @@ impl HostRequest {
     ///
     /// # Panics
     ///
-    /// Panics if query keyexpr is not NodeKeyexpr with Shake role, Some own_id, and matching remote_id.
+    /// Panics if query keyexpr is not NodeKeyexpr with Shake role, Some node_a (host_id), and matching node_b (client_id).
     pub fn new(query: Query, client_id: NodeId) -> Self {
         let parsed = NodeKeyexpr::try_from(query.key_expr().clone()).expect("Invalid NodeKeyexpr");
         assert_eq!(
@@ -53,19 +53,19 @@ impl HostRequest {
             query.key_expr().as_str()
         );
         assert!(
-            parsed.own_id().is_some(),
-            "Expected specific own_id in query keyexpr: {}",
+            parsed.node_a().is_some(),
+            "Expected specific node_a (host_id) in query keyexpr: {}",
             query.key_expr().as_str()
         );
         assert_eq!(
-            parsed.remote_id().as_ref().unwrap_or_else(|| panic!(
-                "Expected specific remote_id in query keyexpr: {}",
+            parsed.node_b().as_ref().unwrap_or_else(|| panic!(
+                "Expected specific node_b (client_id) in query keyexpr: {}",
                 query.key_expr().as_str()
             )),
             &client_id,
             "Client ID mismatch: expected '{}', found '{}'",
             client_id,
-            parsed.remote_id().as_ref().unwrap()
+            parsed.node_b().as_ref().unwrap()
         );
 
         Self { query, client_id }
@@ -169,40 +169,40 @@ impl HostQueryable {
             // Parse the incoming query keyexpr to determine if it's discovery or connection
             let query_keyexpr = query.key_expr().clone();
 
-            // Try to parse as NodeKeyexpr with Shake role to extract own_id and remote_id
+            // Try to parse as NodeKeyexpr with Shake role to extract node_a (host_id) and node_b (client_id)
             match NodeKeyexpr::try_from(query_keyexpr.clone()) {
                 Ok(parsed) => {
-                    match (parsed.own_id(), parsed.remote_id()) {
-                        (Some(own_id), Some(remote_id)) => {
+                    match (parsed.node_a(), parsed.node_b()) {
+                        (Some(host_id), Some(client_id)) => {
                             assert_eq!(
-                                own_id, &self.node_id,
+                                host_id, &self.node_id,
                                 "Host ID mismatch: expected '{}', found '{}'",
-                                self.node_id, own_id
+                                self.node_id, host_id
                             );
-                            // Connection request (specific own_id and remote_id): return it
-                            return Ok(HostRequest::new(query, remote_id.clone()));
+                            // Connection request (specific node_a and node_b): return it
+                            return Ok(HostRequest::new(query, client_id.clone()));
                         }
-                        (Some(own_id), None) => {
-                            // ignore invalid case: specific own_id but glob remote_id
+                        (Some(host_id), None) => {
+                            // ignore invalid case: specific node_a (host_id) but glob node_b (client_id)
                             tracing::debug!(
-                                "Invalid query with specific own_id '{}' but glob remote_id: {}",
-                                own_id,
+                                "Invalid query with specific node_a (host_id) '{}' but glob node_b (client_id): {}",
+                                host_id,
                                 query_keyexpr.as_str()
                             );
                         }
-                        (None, Some(remote_id)) => {
-                            // request from specific remote_id but glob own_id - correct discovery case
+                        (None, Some(client_id)) => {
+                            // request from specific node_b (client_id) but glob node_a (host_id) - correct discovery case
                             // Trace and reply with ok, confirming presence
                             tracing::debug!(
-                                "Discovery request from remote_id '{}' with glob own_id: {}",
-                                remote_id,
+                                "Discovery request from node_b (client_id) '{}' with glob node_a (host_id): {}",
+                                client_id,
                                 query_keyexpr.as_str()
                             );
                             let reply_host_client = NodeKeyexpr::new(
                                 self.prefix.clone(),
                                 Role::Shake,
                                 Some(self.node_id.clone()),
-                                Some(remote_id.clone()),
+                                Some(client_id.clone()),
                             );
                             let reply_keyexpr: KeyExpr = reply_host_client.into();
                             if let Err(e) = query.reply(&reply_keyexpr, "").await {
@@ -210,9 +210,9 @@ impl HostQueryable {
                             }
                         }
                         (None, None) => {
-                            // ignore invalid case: glob own_id and glob remote_id
+                            // ignore invalid case: glob node_a (host_id) and glob node_b (client_id)
                             tracing::debug!(
-                                "Invalid query with glob own_id and glob remote_id: {}",
+                                "Invalid query with glob node_a (host_id) and glob node_b (client_id): {}",
                                 query_keyexpr.as_str()
                             );
                         }

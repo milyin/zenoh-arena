@@ -79,7 +79,7 @@ impl HostQuerier {
         let prefix = prefix.into();
 
         // Phase 1: Discover all available hosts
-        // Query: <prefix>/shake/*/client_id (glob on own_id, specific remote_id)
+        // Query: <prefix>/shake/*/client_id (glob on node_a, specific node_b)
         // This queries all hosts in the arena, asking them to confirm presence
         let discover_keyexpr =
             NodeKeyexpr::new(prefix.clone(), Role::Shake, None, Some(client_id.clone()));
@@ -96,7 +96,7 @@ impl HostQuerier {
                     let keyexpr = sample.key_expr().clone();
                     match NodeKeyexpr::try_from(keyexpr.clone()) {
                         Ok(parsed) => {
-                            if let Some(host_id) = parsed.own_id() {
+                            if let Some(host_id) = parsed.node_a() {
                                 tracing::debug!("Discovered host: {}", host_id);
                                 host_ids.push(host_id.clone());
                             }
@@ -123,7 +123,7 @@ impl HostQuerier {
         );
 
         // Phase 2: Try connecting to each discovered host
-        // Query: <prefix>/shake/<host_id>/<client_id> (specific own_id and remote_id)
+        // Query: <prefix>/shake/<host_id>/<client_id> (specific node_a and node_b)
         // This requests the specific host to confirm it accepts this client's connection
         for host_id in host_ids {
             let connect_keyexpr = NodeKeyexpr::new(
