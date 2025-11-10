@@ -38,7 +38,7 @@
 //! This design allows a single queryable to handle both phases efficiently.
 
 use crate::error::Result;
-use crate::network::keyexpr::{NodeKeyexpr, Role};
+use crate::network::keyexpr::{KeyexprTemplate, Role};
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
@@ -82,7 +82,7 @@ impl HostQuerier {
         // Query: <prefix>/shake/*/client_id (glob on node_a, specific node_b)
         // This queries all hosts in the arena, asking them to confirm presence
         let discover_keyexpr =
-            NodeKeyexpr::new(prefix.clone(), Role::Shake, None, Some(client_id.clone()));
+            KeyexprTemplate::new(prefix.clone(), Role::Shake, None, Some(client_id.clone()));
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
@@ -94,7 +94,7 @@ impl HostQuerier {
             match reply.result() {
                 Ok(sample) => {
                     let keyexpr = sample.key_expr().clone();
-                    match NodeKeyexpr::try_from(keyexpr.clone()) {
+                    match KeyexprTemplate::try_from(keyexpr.clone()) {
                         Ok(parsed) => {
                             if let Some(host_id) = parsed.node_a() {
                                 tracing::debug!("Discovered host: {}", host_id);
@@ -126,7 +126,7 @@ impl HostQuerier {
         // Query: <prefix>/shake/<host_id>/<client_id> (specific node_a and node_b)
         // This requests the specific host to confirm it accepts this client's connection
         for host_id in host_ids {
-            let connect_keyexpr = NodeKeyexpr::new(
+            let connect_keyexpr = KeyexprTemplate::new(
                 prefix.clone(),
                 Role::Shake,
                 Some(host_id.clone()),

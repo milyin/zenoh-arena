@@ -1,7 +1,7 @@
 //! Liveliness token management
 
 use crate::error::Result;
-use crate::network::keyexpr::{NodeKeyexpr, Role};
+use crate::network::keyexpr::{KeyexprTemplate, Role};
 use crate::node::types::NodeId;
 use futures::future::select_all;
 use std::pin::Pin;
@@ -32,7 +32,7 @@ impl NodeLivelinessToken {
         role: Role,
         node_id: NodeId,
     ) -> Result<Self> {
-        let node_keyexpr = NodeKeyexpr::new(prefix, role, Some(node_id.clone()), None);
+        let node_keyexpr = KeyexprTemplate::new(prefix, role, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
 
         // Check if another token with the same keyexpr already exists
@@ -107,7 +107,7 @@ impl NodeLivelinessWatch {
         role: Role,
         node_id: &NodeId,
     ) -> Result<()> {
-        let node_keyexpr = NodeKeyexpr::new(prefix, role, Some(node_id.clone()), None);
+        let node_keyexpr = KeyexprTemplate::new(prefix, role, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
 
         let subscriber = session

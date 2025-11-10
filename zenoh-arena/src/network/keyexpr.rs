@@ -56,14 +56,14 @@ impl Role {
 /// Pattern: `<prefix>/shake/<node_a>/<node_b>` (for Shake: host_id/client_id)
 /// Pattern: `<prefix>/link/<node_a>/<node_b>` (for Link: sender_id/receiver_id)
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeKeyexpr {
+pub struct KeyexprTemplate {
     prefix: KeyExpr<'static>,
     role: Role,
     node_a: Option<NodeId>,
     node_b: Option<NodeId>,
 }
 
-impl NodeKeyexpr {
+impl KeyexprTemplate {
     /// Create a new NodeKeyexpr
     pub fn new<P: Into<KeyExpr<'static>>>(
         prefix: P,
@@ -111,7 +111,7 @@ impl NodeKeyexpr {
     }
 }
 
-impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
+impl TryFrom<KeyExpr<'_>> for KeyexprTemplate {
     type Error = ArenaError;
 
     fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
@@ -200,8 +200,8 @@ impl TryFrom<KeyExpr<'_>> for NodeKeyexpr {
     }
 }
 
-impl From<NodeKeyexpr> for KeyExpr<'static> {
-    fn from(keyexpr: NodeKeyexpr) -> Self {
+impl From<KeyexprTemplate> for KeyExpr<'static> {
+    fn from(keyexpr: KeyexprTemplate) -> Self {
         let keyexpr_str = if keyexpr.role.has_remote_id() {
             // Shake/Link role: <prefix>/shake|link/<node_a>/<node_b>
             let node_a_str = match &keyexpr.node_a {
@@ -246,7 +246,7 @@ mod tests {
         let node_a = NodeId::from_name("host1".to_string()).unwrap();
         let node_b = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(
+        let link_keyexpr = KeyexprTemplate::new(
             prefix,
             Role::Link,
             Some(node_a.clone()),
@@ -263,7 +263,7 @@ mod tests {
         let node_a = NodeId::from_name("host1".to_string()).unwrap();
         let node_b = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(
+        let link_keyexpr = KeyexprTemplate::new(
             prefix,
             Role::Link,
             Some(node_a.clone()),
@@ -273,7 +273,7 @@ mod tests {
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/client1");
 
-        let parsed = NodeKeyexpr::try_from(keyexpr).unwrap();
+        let parsed = KeyexprTemplate::try_from(keyexpr).unwrap();
         assert_eq!(parsed.node_a(), &Some(node_a));
         assert_eq!(parsed.node_b(), &Some(node_b));
         assert_eq!(parsed.role(), Role::Link);
@@ -284,12 +284,12 @@ mod tests {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
         let node_a = NodeId::from_name("host1".to_string()).unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, Some(node_a.clone()), None);
+        let link_keyexpr = KeyexprTemplate::new(prefix, Role::Link, Some(node_a.clone()), None);
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/*");
 
-        let parsed = NodeKeyexpr::try_from(keyexpr).unwrap();
+        let parsed = KeyexprTemplate::try_from(keyexpr).unwrap();
         assert_eq!(parsed.node_a(), &Some(node_a));
         assert_eq!(parsed.node_b(), &None);
         assert_eq!(parsed.role(), Role::Link);
@@ -300,12 +300,12 @@ mod tests {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
         let node_b = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, None, Some(node_b.clone()));
+        let link_keyexpr = KeyexprTemplate::new(prefix, Role::Link, None, Some(node_b.clone()));
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/*/client1");
 
-        let parsed = NodeKeyexpr::try_from(keyexpr).unwrap();
+        let parsed = KeyexprTemplate::try_from(keyexpr).unwrap();
         assert_eq!(parsed.node_a(), &None);
         assert_eq!(parsed.node_b(), &Some(node_b));
         assert_eq!(parsed.role(), Role::Link);
@@ -315,12 +315,12 @@ mod tests {
     fn test_link_keyexpr_wildcard_both() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
 
-        let link_keyexpr = NodeKeyexpr::new(prefix, Role::Link, None, None);
+        let link_keyexpr = KeyexprTemplate::new(prefix, Role::Link, None, None);
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/*/*");
 
-        let parsed = NodeKeyexpr::try_from(keyexpr).unwrap();
+        let parsed = KeyexprTemplate::try_from(keyexpr).unwrap();
         assert_eq!(parsed.node_a(), &None);
         assert_eq!(parsed.node_b(), &None);
         assert_eq!(parsed.role(), Role::Link);
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn test_link_keyexpr_invalid_pattern() {
         let keyexpr = KeyExpr::try_from("arena/game1/invalid/host1/client1").unwrap();
-        let result = NodeKeyexpr::try_from(keyexpr);
+        let result = KeyexprTemplate::try_from(keyexpr);
         assert!(result.is_err());
     }
 }

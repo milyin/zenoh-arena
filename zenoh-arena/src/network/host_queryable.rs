@@ -23,7 +23,7 @@
 //! - If it matches `<host_id>/*` pattern with glob client_id → Discovery request (replied immediately)
 
 use crate::error::Result;
-use crate::network::keyexpr::{NodeKeyexpr, Role};
+use crate::network::keyexpr::{KeyexprTemplate, Role};
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 use zenoh::query::{Query, Queryable};
@@ -45,7 +45,7 @@ impl HostRequest {
     ///
     /// Panics if query keyexpr is not NodeKeyexpr with Shake role, Some node_a (host_id), and matching node_b (client_id).
     pub fn new(query: Query, client_id: NodeId) -> Self {
-        let parsed = NodeKeyexpr::try_from(query.key_expr().clone()).expect("Invalid NodeKeyexpr");
+        let parsed = KeyexprTemplate::try_from(query.key_expr().clone()).expect("Invalid NodeKeyexpr");
         assert_eq!(
             parsed.role(),
             Role::Shake,
@@ -138,7 +138,7 @@ impl HostQueryable {
         let prefix = prefix.into();
         // Declare on pattern: <prefix>/shake/<host_id>/*
         let host_client_keyexpr =
-            NodeKeyexpr::new(prefix.clone(), Role::Shake, Some(node_id.clone()), None);
+            KeyexprTemplate::new(prefix.clone(), Role::Shake, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = host_client_keyexpr.into();
 
         // Declare queryable without callback
@@ -170,7 +170,7 @@ impl HostQueryable {
             let query_keyexpr = query.key_expr().clone();
 
             // Try to parse as NodeKeyexpr with Shake role to extract node_a (host_id) and node_b (client_id)
-            match NodeKeyexpr::try_from(query_keyexpr.clone()) {
+            match KeyexprTemplate::try_from(query_keyexpr.clone()) {
                 Ok(parsed) => {
                     match (parsed.node_a(), parsed.node_b()) {
                         (Some(host_id), Some(client_id)) => {
@@ -198,7 +198,7 @@ impl HostQueryable {
                                 client_id,
                                 query_keyexpr.as_str()
                             );
-                            let reply_host_client = NodeKeyexpr::new(
+                            let reply_host_client = KeyexprTemplate::new(
                                 self.prefix.clone(),
                                 Role::Shake,
                                 Some(self.node_id.clone()),

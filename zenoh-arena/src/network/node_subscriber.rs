@@ -1,7 +1,7 @@
 //! Subscriber for node data with deserialization
 
 use crate::error::Result;
-use crate::network::keyexpr::{NodeKeyexpr, Role};
+use crate::network::keyexpr::{KeyexprTemplate, Role};
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
@@ -40,7 +40,7 @@ where
         node_id: &NodeId,
     ) -> Result<Self> {
         // Construct Link keyexpr: <prefix>/link/<node_id>/* (node_a=sender_id, node_b=receiver_id=*)
-        let node_keyexpr = NodeKeyexpr::new(prefix, Role::Link, Some(node_id.clone()), None);
+        let node_keyexpr = KeyexprTemplate::new(prefix, Role::Link, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
 
         let subscriber = session

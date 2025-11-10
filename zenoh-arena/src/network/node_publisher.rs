@@ -1,7 +1,7 @@
 //! Publisher for node data with serialization
 
 use crate::error::Result;
-use crate::network::keyexpr::{NodeKeyexpr, Role};
+use crate::network::keyexpr::{KeyexprTemplate, Role};
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
@@ -41,7 +41,7 @@ where
         receiver_id: &NodeId,
     ) -> Result<Self> {
         // Construct Link keyexpr: <prefix>/link/<sender_id>/<receiver_id> (node_a=sender_id, node_b=receiver_id)
-        let node_keyexpr = NodeKeyexpr::new(
+        let node_keyexpr = KeyexprTemplate::new(
             prefix,
             Role::Link,
             Some(sender_id.clone()),
