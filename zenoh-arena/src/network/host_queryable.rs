@@ -23,7 +23,7 @@
 //! - If it matches `<host_id>/*` pattern with glob client_id → Discovery request (replied immediately)
 
 use crate::error::Result;
-use crate::network::keyexpr::{KeyexprTemplate, Role};
+use crate::network::keyexpr::KeyexprShake;
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 use zenoh::query::{Query, Queryable};
@@ -45,27 +45,22 @@ impl HostRequest {
     ///
     /// Panics if query keyexpr is not NodeKeyexpr with Shake role, Some node_a (host_id), and matching node_b (client_id).
     pub fn new(query: Query, client_id: NodeId) -> Self {
-        let parsed = KeyexprTemplate::try_from(query.key_expr().clone()).expect("Invalid NodeKeyexpr");
-        assert_eq!(
-            parsed.role(),
-            Role::Shake,
-            "Expected Shake role in query keyexpr: {}",
-            query.key_expr().as_str()
-        );
+        let parsed =
+            KeyexprShake::try_from(query.key_expr().clone()).expect("Invalid KeyexprShake");
         assert!(
-            parsed.node_a().is_some(),
-            "Expected specific node_a (host_id) in query keyexpr: {}",
+            parsed.host_id().is_some(),
+            "Expected specific host_id in query keyexpr: {}",
             query.key_expr().as_str()
         );
         assert_eq!(
-            parsed.node_b().as_ref().unwrap_or_else(|| panic!(
-                "Expected specific node_b (client_id) in query keyexpr: {}",
+            parsed.client_id().as_ref().unwrap_or_else(|| panic!(
+                "Expected specific client_id in query keyexpr: {}",
                 query.key_expr().as_str()
             )),
             &client_id,
             "Client ID mismatch: expected '{}', found '{}'",
             client_id,
-            parsed.node_b().as_ref().unwrap()
+            parsed.client_id().as_ref().unwrap()
         );
 
         Self { query, client_id }
@@ -137,8 +132,7 @@ impl HostQueryable {
     ) -> Result<Self> {
         let prefix = prefix.into();
         // Declare on pattern: <prefix>/shake/<host_id>/*
-        let host_client_keyexpr =
-            KeyexprTemplate::new(prefix.clone(), Role::Shake, Some(node_id.clone()), None);
+        let host_client_keyexpr = KeyexprShake::new(prefix.clone(), Some(node_id.clone()), None);
         let keyexpr: KeyExpr = host_client_keyexpr.into();
 
         // Declare queryable without callback
@@ -169,38 +163,37 @@ impl HostQueryable {
             // Parse the incoming query keyexpr to determine if it's discovery or connection
             let query_keyexpr = query.key_expr().clone();
 
-            // Try to parse as NodeKeyexpr with Shake role to extract node_a (host_id) and node_b (client_id)
-            match KeyexprTemplate::try_from(query_keyexpr.clone()) {
+            // Try to parse as KeyexprShake to extract host_id and client_id
+            match KeyexprShake::try_from(query_keyexpr.clone()) {
                 Ok(parsed) => {
-                    match (parsed.node_a(), parsed.node_b()) {
+                    match (parsed.host_id(), parsed.client_id()) {
                         (Some(host_id), Some(client_id)) => {
                             assert_eq!(
                                 host_id, &self.node_id,
                                 "Host ID mismatch: expected '{}', found '{}'",
                                 self.node_id, host_id
                             );
-                            // Connection request (specific node_a and node_b): return it
+                            // Connection request (specific host_id and client_id): return it
                             return Ok(HostRequest::new(query, client_id.clone()));
                         }
                         (Some(host_id), None) => {
-                            // ignore invalid case: specific node_a (host_id) but glob node_b (client_id)
+                            // ignore invalid case: specific host_id but glob client_id
                             tracing::debug!(
-                                "Invalid query with specific node_a (host_id) '{}' but glob node_b (client_id): {}",
+                                "Invalid query with specific host_id '{}' but glob client_id: {}",
                                 host_id,
                                 query_keyexpr.as_str()
                             );
                         }
                         (None, Some(client_id)) => {
-                            // request from specific node_b (client_id) but glob node_a (host_id) - correct discovery case
+                            // request from specific client_id but glob host_id - correct discovery case
                             // Trace and reply with ok, confirming presence
                             tracing::debug!(
-                                "Discovery request from node_b (client_id) '{}' with glob node_a (host_id): {}",
+                                "Discovery request from client_id '{}' with glob host_id: {}",
                                 client_id,
                                 query_keyexpr.as_str()
                             );
-                            let reply_host_client = KeyexprTemplate::new(
+                            let reply_host_client = KeyexprShake::new(
                                 self.prefix.clone(),
-                                Role::Shake,
                                 Some(self.node_id.clone()),
                                 Some(client_id.clone()),
                             );
@@ -210,9 +203,9 @@ impl HostQueryable {
                             }
                         }
                         (None, None) => {
-                            // ignore invalid case: glob node_a (host_id) and glob node_b (client_id)
+                            // ignore invalid case: glob host_id and glob client_id
                             tracing::debug!(
-                                "Invalid query with glob node_a (host_id) and glob node_b (client_id): {}",
+                                "Invalid query with glob host_id and glob client_id: {}",
                                 query_keyexpr.as_str()
                             );
                         }

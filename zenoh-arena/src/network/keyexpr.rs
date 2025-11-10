@@ -236,6 +236,209 @@ impl From<KeyexprTemplate> for KeyExpr<'static> {
     }
 }
 
+/// Wrapper for Node role keyexpr: `<prefix>/node/<node_id>`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyexprNode {
+    template: KeyexprTemplate,
+}
+
+impl KeyexprNode {
+    /// Create a new Node keyexpr
+    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, node_id: Option<NodeId>) -> Self {
+        Self {
+            template: KeyexprTemplate::new(prefix, Role::Node, node_id, None),
+        }
+    }
+
+    /// Get the prefix
+    pub fn prefix(&self) -> &KeyExpr<'static> {
+        self.template.prefix()
+    }
+
+    /// Get the node ID (None means wildcard)
+    pub fn node_id(&self) -> &Option<NodeId> {
+        self.template.node_a()
+    }
+}
+
+impl From<KeyexprNode> for KeyExpr<'static> {
+    fn from(keyexpr: KeyexprNode) -> Self {
+        keyexpr.template.into()
+    }
+}
+
+/// Wrapper for Host role keyexpr: `<prefix>/host/<host_id>`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyexprHost {
+    template: KeyexprTemplate,
+}
+
+impl KeyexprHost {
+    /// Create a new Host keyexpr
+    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, host_id: Option<NodeId>) -> Self {
+        Self {
+            template: KeyexprTemplate::new(prefix, Role::Host, host_id, None),
+        }
+    }
+
+    /// Get the prefix
+    pub fn prefix(&self) -> &KeyExpr<'static> {
+        self.template.prefix()
+    }
+
+    /// Get the host ID (None means wildcard)
+    pub fn host_id(&self) -> &Option<NodeId> {
+        self.template.node_a()
+    }
+}
+
+impl From<KeyexprHost> for KeyExpr<'static> {
+    fn from(keyexpr: KeyexprHost) -> Self {
+        keyexpr.template.into()
+    }
+}
+
+/// Wrapper for Client role keyexpr: `<prefix>/client/<client_id>`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyexprClient {
+    template: KeyexprTemplate,
+}
+
+impl KeyexprClient {
+    /// Create a new Client keyexpr
+    pub fn new<P: Into<KeyExpr<'static>>>(prefix: P, client_id: Option<NodeId>) -> Self {
+        Self {
+            template: KeyexprTemplate::new(prefix, Role::Client, client_id, None),
+        }
+    }
+
+    /// Get the prefix
+    pub fn prefix(&self) -> &KeyExpr<'static> {
+        self.template.prefix()
+    }
+
+    /// Get the client ID (None means wildcard)
+    pub fn client_id(&self) -> &Option<NodeId> {
+        self.template.node_a()
+    }
+}
+
+impl From<KeyexprClient> for KeyExpr<'static> {
+    fn from(keyexpr: KeyexprClient) -> Self {
+        keyexpr.template.into()
+    }
+}
+
+/// Wrapper for Shake role keyexpr: `<prefix>/shake/<host_id>/<client_id>`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyexprShake {
+    template: KeyexprTemplate,
+}
+
+impl KeyexprShake {
+    /// Create a new Shake keyexpr for handshake
+    pub fn new<P: Into<KeyExpr<'static>>>(
+        prefix: P,
+        host_id: Option<NodeId>,
+        client_id: Option<NodeId>,
+    ) -> Self {
+        Self {
+            template: KeyexprTemplate::new(prefix, Role::Shake, host_id, client_id),
+        }
+    }
+
+    /// Get the prefix
+    pub fn prefix(&self) -> &KeyExpr<'static> {
+        self.template.prefix()
+    }
+
+    /// Get the host ID (None means wildcard)
+    pub fn host_id(&self) -> &Option<NodeId> {
+        self.template.node_a()
+    }
+
+    /// Get the client ID (None means wildcard)
+    pub fn client_id(&self) -> &Option<NodeId> {
+        self.template.node_b()
+    }
+}
+
+impl From<KeyexprShake> for KeyExpr<'static> {
+    fn from(keyexpr: KeyexprShake) -> Self {
+        keyexpr.template.into()
+    }
+}
+
+impl TryFrom<KeyExpr<'_>> for KeyexprShake {
+    type Error = ArenaError;
+
+    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
+        let template = KeyexprTemplate::try_from(keyexpr)?;
+        if template.role() != Role::Shake {
+            return Err(ArenaError::InvalidKeyexpr(format!(
+                "Expected Shake role, found {:?}",
+                template.role()
+            )));
+        }
+        Ok(Self { template })
+    }
+}
+
+/// Wrapper for Link role keyexpr: `<prefix>/link/<sender_id>/<receiver_id>`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyexprLink {
+    template: KeyexprTemplate,
+}
+
+impl KeyexprLink {
+    /// Create a new Link keyexpr for data communication
+    pub fn new<P: Into<KeyExpr<'static>>>(
+        prefix: P,
+        sender_id: Option<NodeId>,
+        receiver_id: Option<NodeId>,
+    ) -> Self {
+        Self {
+            template: KeyexprTemplate::new(prefix, Role::Link, sender_id, receiver_id),
+        }
+    }
+
+    /// Get the prefix
+    pub fn prefix(&self) -> &KeyExpr<'static> {
+        self.template.prefix()
+    }
+
+    /// Get the sender ID (None means wildcard)
+    pub fn sender_id(&self) -> &Option<NodeId> {
+        self.template.node_a()
+    }
+
+    /// Get the receiver ID (None means wildcard)
+    pub fn receiver_id(&self) -> &Option<NodeId> {
+        self.template.node_b()
+    }
+}
+
+impl From<KeyexprLink> for KeyExpr<'static> {
+    fn from(keyexpr: KeyexprLink) -> Self {
+        keyexpr.template.into()
+    }
+}
+
+impl TryFrom<KeyExpr<'_>> for KeyexprLink {
+    type Error = ArenaError;
+
+    fn try_from(keyexpr: KeyExpr<'_>) -> Result<Self, Self::Error> {
+        let template = KeyexprTemplate::try_from(keyexpr)?;
+        if template.role() != Role::Link {
+            return Err(ArenaError::InvalidKeyexpr(format!(
+                "Expected Link role, found {:?}",
+                template.role()
+            )));
+        }
+        Ok(Self { template })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,7 @@
 //! Subscriber for node data with deserialization
 
 use crate::error::Result;
-use crate::network::keyexpr::{KeyexprTemplate, Role};
+use crate::network::keyexpr::KeyexprLink;
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
@@ -32,15 +32,15 @@ where
     ///
     /// Immediately declares a Zenoh subscriber for the link keyexpr constructed from
     /// the given prefix and node ID. The keyexpr pattern will be:
-    /// `<prefix>/link/<node_id>/*` (node_a: sender_id=node_id, node_b: receiver_id=wildcard)
+    /// `<prefix>/link/<node_id>/*` (sender_id=node_id, receiver_id=wildcard)
     /// to receive all messages for the specified node (as sender).
     pub async fn new(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/link/<node_id>/* (node_a=sender_id, node_b=receiver_id=*)
-        let node_keyexpr = KeyexprTemplate::new(prefix, Role::Link, Some(node_id.clone()), None);
+        // Construct Link keyexpr: <prefix>/link/<node_id>/* (sender_id, receiver_id=*)
+        let node_keyexpr = KeyexprLink::new(prefix, Some(node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
 
         let subscriber = session

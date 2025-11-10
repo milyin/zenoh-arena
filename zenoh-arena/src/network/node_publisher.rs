@@ -1,7 +1,7 @@
 //! Publisher for node data with serialization
 
 use crate::error::Result;
-use crate::network::keyexpr::{KeyexprTemplate, Role};
+use crate::network::keyexpr::KeyexprLink;
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
@@ -32,7 +32,7 @@ where
     ///
     /// Immediately declares a Zenoh publisher for the link keyexpr constructed from
     /// the given prefix, sender node ID, and receiver node ID. The keyexpr pattern will be:
-    /// `<prefix>/link/<sender_id>/<receiver_id>` (node_a: sender_id, node_b: receiver_id)
+    /// `<prefix>/link/<sender_id>/<receiver_id>` (sender_id, receiver_id)
     /// to send messages to the specified remote node.
     pub async fn new(
         session: &zenoh::Session,
@@ -40,10 +40,9 @@ where
         sender_id: &NodeId,
         receiver_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/link/<sender_id>/<receiver_id> (node_a=sender_id, node_b=receiver_id)
-        let node_keyexpr = KeyexprTemplate::new(
+        // Construct Link keyexpr: <prefix>/link/<sender_id>/<receiver_id>
+        let node_keyexpr = KeyexprLink::new(
             prefix,
-            Role::Link,
             Some(sender_id.clone()),
             Some(receiver_id.clone()),
         );
