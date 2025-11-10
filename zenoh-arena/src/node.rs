@@ -22,7 +22,6 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
     id: NodeId,
 
     /// Node configuration
-    #[allow(dead_code)]
     config: NodeConfig,
 
     /// Current node state
@@ -32,7 +31,6 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
     session: zenoh::Session,
 
     /// Engine factory - called when transitioning to host mode
-    #[allow(dead_code)]
     get_engine: F,
 
     /// Receiver for commands from the application
