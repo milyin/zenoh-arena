@@ -50,9 +50,6 @@ impl Role {
 /// Pattern: `<prefix>/<role>/<own_id>` (for Node, Host, Client with specific IDs)
 /// Pattern: `<prefix>/<role>/*` (for Node, Host, Client with wildcards)
 /// Pattern: `<prefix>/link/<own_id>/<remote_id>` (for Link with specific IDs)
-/// Pattern: `<prefix>/link/<own_id>/*` (for Link with wildcard remote_id)
-/// Pattern: `<prefix>/link/*/<remote_id>` (for Link with wildcard own_id)
-/// Pattern: `<prefix>/link/*/*` (for Link with both wildcards)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeKeyexpr {
     prefix: KeyExpr<'static>,
