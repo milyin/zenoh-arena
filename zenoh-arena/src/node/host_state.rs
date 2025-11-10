@@ -138,7 +138,6 @@ where
                         .subscribe(
                             session,
                             client_keyexpr,
-                            &client_id,
                         )
                         .await
                     {

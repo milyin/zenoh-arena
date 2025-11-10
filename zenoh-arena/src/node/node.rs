@@ -62,7 +62,6 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         let node_liveliness_token = NodeLivelinessToken::declare(
             &session,
             node_keyexpr,
-            id.clone(),
         )
         .await?;
 

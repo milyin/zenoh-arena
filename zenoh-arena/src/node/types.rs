@@ -256,7 +256,7 @@ where
         // Create host liveliness token for discovery
         let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(node_id.clone()));
         let token =
-            NodeLivelinessToken::declare(session, host_keyexpr, node_id.clone())
+            NodeLivelinessToken::declare(session, host_keyexpr)
                 .await?;
 
         // Declare queryable for host discovery
@@ -296,13 +296,13 @@ where
         let mut liveliness_watch = NodeLivelinessWatch::new(host_id.clone());
         let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(host_id.clone()));
         liveliness_watch
-            .subscribe(session, host_keyexpr, &host_id)
+            .subscribe(session, host_keyexpr)
             .await?;
 
         // Declare client liveliness token (role: Client) so host can track our presence
         let client_keyexpr = KeyexprClient::new(prefix, Some(client_id.clone()));
         let liveliness_token =
-            NodeLivelinessToken::declare(session, client_keyexpr, client_id).await?;
+            NodeLivelinessToken::declare(session, client_keyexpr).await?;
 
         *self = NodeStateInternal::Client(ClientState {
             host_id,

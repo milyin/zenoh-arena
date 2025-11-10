@@ -1,6 +1,7 @@
 //! Liveliness token management
 
 use crate::error::Result;
+use crate::network::keyexpr::KeyexprNodeTrait;
 use crate::node::types::NodeId;
 use futures::future::select_all;
 use std::pin::Pin;
@@ -25,12 +26,12 @@ impl NodeLivelinessToken {
     /// Before creating the token, performs a liveliness.get() request to check if
     /// another token with the same keyexpr already exists in the network.
     /// If a conflict is detected, returns a LivelinessTokenConflict error.
-    pub async fn declare(
+    pub async fn declare<K: KeyexprNodeTrait>(
         session: &zenoh::Session,
-        keyexpr: impl Into<KeyExpr<'static>>,
-        node_id: NodeId,
+        keyexpr: K,
     ) -> Result<Self> {
-        let keyexpr: KeyExpr = keyexpr.into();
+        let node_id = keyexpr.node_id().clone().expect("node_id must be specified for liveliness token");
+        let keyexpr: KeyExpr = keyexpr.to_keyexpr();
 
         // Check if another token with the same keyexpr already exists
         let replies = session
@@ -97,13 +98,13 @@ impl NodeLivelinessWatch {
     /// Adds a new liveliness subscriber that tracks the presence of the specified node.
     /// The subscriber will receive events when the node's liveliness token is declared or undeclared.
     /// Multiple subscribers can be added via repeated calls to this method.
-    pub async fn subscribe(
+    pub async fn subscribe<K: KeyexprNodeTrait>(
         &mut self,
         session: &zenoh::Session,
-        keyexpr: impl Into<KeyExpr<'static>>,
-        node_id: &NodeId,
+        keyexpr: K,
     ) -> Result<()> {
-        let keyexpr: KeyExpr = keyexpr.into();
+        let node_id = keyexpr.node_id().clone().expect("node_id must be specified for liveliness subscription");
+        let keyexpr: KeyExpr = keyexpr.to_keyexpr();
 
         let subscriber = session
             .liveliness()
@@ -112,7 +113,7 @@ impl NodeLivelinessWatch {
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
 
-        self.subscribers.push((node_id.clone(), subscriber));
+        self.subscribers.push((node_id, subscriber));
         Ok(())
     }
 
