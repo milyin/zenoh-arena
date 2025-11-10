@@ -161,14 +161,7 @@ where
 
     /// Connected as client to a host
     #[allow(dead_code)]
-    Client {
-        /// ID of the host we're connected to
-        host_id: NodeId,
-        /// Watches for host liveliness to detect disconnection
-        liveliness_watch: NodeLivelinessWatch,
-        /// Client's liveliness token (role: Client) for the host to track disconnection
-        liveliness_token: NodeLivelinessToken,
-    },
+    Client(crate::client_state::ClientState),
 
     /// Acting as host
     Host {
@@ -195,8 +188,10 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             NodeStateInternal::SearchingHost => f.debug_tuple("SearchingHost").finish(),
-            NodeStateInternal::Client { host_id, .. } => {
-                f.debug_struct("Client").field("host_id", host_id).finish()
+            NodeStateInternal::Client(client_state) => {
+                f.debug_struct("Client")
+                    .field("host_id", &client_state.host_id)
+                    .finish()
             }
             NodeStateInternal::Host {
                 connected_clients,
@@ -336,11 +331,11 @@ where
         let liveliness_token =
             NodeLivelinessToken::declare(session, prefix, Role::Client, client_id).await?;
 
-        *self = NodeStateInternal::Client {
+        *self = NodeStateInternal::Client(crate::client_state::ClientState {
             host_id,
             liveliness_watch,
             liveliness_token,
-        };
+        });
 
         Ok(())
     }
@@ -353,8 +348,8 @@ where
     fn from(internal: &NodeStateInternal<E>) -> Self {
         match internal {
             NodeStateInternal::SearchingHost => NodeState::SearchingHost,
-            NodeStateInternal::Client { host_id, .. } => NodeState::Client {
-                host_id: host_id.clone(),
+            NodeStateInternal::Client(client_state) => NodeState::Client {
+                host_id: client_state.host_id.clone(),
             },
             NodeStateInternal::Host {
                 connected_clients,

@@ -1,10 +1,19 @@
 /// Client state implementation
 use crate::config::NodeConfig;
 use crate::error::Result;
-use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
+use crate::network::{NodeLivelinessToken, NodeLivelinessWatch};
+use crate::types::{NodeId, NodeState, NodeStatus};
 
 /// State while connected as a client to a host
-pub(crate) struct ClientState;
+pub(crate) struct ClientState {
+    /// ID of the host we're connected to
+    pub(crate) host_id: NodeId,
+    /// Watches for host liveliness to detect disconnection
+    pub(crate) liveliness_watch: NodeLivelinessWatch,
+    /// Client's liveliness token (role: Client) for the host to track disconnection
+    #[allow(dead_code)]
+    pub(crate) liveliness_token: NodeLivelinessToken,
+}
 
 impl ClientState {
     /// Process the Client state - handle commands while connected to a host
@@ -16,8 +25,7 @@ impl ClientState {
     /// - The step timeout elapses
     /// - A Stop command is received (returns None)
     pub(crate) async fn run<E>(
-        &self,
-        state: &mut NodeStateInternal<E>,
+        &mut self,
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<crate::node::NodeCommand<E::Action>>,
@@ -25,24 +33,6 @@ impl ClientState {
     where
         E: crate::node::GameEngine,
     {
-        // Extract the client state data temporarily to use the liveliness watch
-        let (host_id, mut liveliness_watch, _liveliness_token) =
-            match std::mem::take(state) {
-                NodeStateInternal::Client {
-                    host_id,
-                    liveliness_watch,
-                    liveliness_token,
-                } => (host_id, liveliness_watch, liveliness_token),
-                other_state => {
-                    // Restore state if it wasn't Client
-                    *state = other_state;
-                    return Ok(Some(NodeStatus {
-                        state: NodeState::from(&*state),
-                        game_state: None,
-                    }));
-                }
-            };
-
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
@@ -52,35 +42,29 @@ impl ClientState {
             tokio::select! {
                 // Timeout elapsed
                 () = &mut sleep => {
-                    // No disconnection yet, restore state and return
-                    *state = NodeStateInternal::Client {
-                        host_id: host_id.clone(),
-                        liveliness_watch,
-                        liveliness_token: _liveliness_token,
-                    };
                     return Ok(Some(NodeStatus {
-                        state: NodeState::from(&*state),
+                        state: NodeState::Client {
+                            host_id: self.host_id.clone(),
+                        },
                         game_state: None,
                     }));
                 }
                 // Host liveliness lost - disconnect and return to searching
-                disconnect_result = liveliness_watch.disconnected() => {
+                disconnect_result = self.liveliness_watch.disconnected() => {
                     match disconnect_result {
                         Ok(disconnected_id) => {
                             tracing::info!("Node '{}' detected host '{}' disconnection, returning to search", node_id, disconnected_id);
                             // Transition back to SearchingHost
-                            *state = NodeStateInternal::SearchingHost;
                             return Ok(Some(NodeStatus {
-                                state: NodeState::from(&*state),
+                                state: NodeState::SearchingHost,
                                 game_state: None,
                             }));
                         }
                         Err(e) => {
                             tracing::warn!("Node '{}' liveliness error: {}", node_id, e);
                             // Treat error as disconnect
-                            *state = NodeStateInternal::SearchingHost;
                             return Ok(Some(NodeStatus {
-                                state: NodeState::from(&*state),
+                                state: NodeState::SearchingHost,
                                 game_state: None,
                             }));
                         }
@@ -100,7 +84,7 @@ impl ClientState {
                         tracing::debug!(
                             "Node '{}' forwarding action to host '{}'",
                             node_id,
-                            host_id
+                            self.host_id
                         );
                         // TODO: Forward action to remote host via Zenoh pub/sub
                         // Placeholder for Phase 4 implementation

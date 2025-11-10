@@ -131,7 +131,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         }
 
         // Dispatch based on current state using state-specific run methods
-        match &self.state {
+        match &mut self.state {
             NodeStateInternal::SearchingHost => {
                 use crate::searching_host_state::SearchingHostState;
                 let searching_state = SearchingHostState;
@@ -146,12 +146,30 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     )
                     .await
             }
-            NodeStateInternal::Client { .. } => {
-                use crate::client_state::ClientState;
-                let client_state = ClientState;
-                client_state
-                    .run(&mut self.state, &self.config, &self.id, &self.command_rx)
-                    .await
+            NodeStateInternal::Client(client_state) => {
+                // Call run method on the client state
+                let result = client_state
+                    .run::<E>(&self.config, &self.id, &self.command_rx)
+                    .await?;
+                
+                // Construct the appropriate NodeStatus response
+                if let Some(status) = result {
+                    // Check if we should transition to a different state
+                    match status.state {
+                        crate::types::NodeState::SearchingHost => {
+                            self.state = NodeStateInternal::SearchingHost;
+                        }
+                        crate::types::NodeState::Client { .. } => {
+                            // Stay in Client state, client_state already updated in place
+                        }
+                        _ => {
+                            // This shouldn't happen from Client state
+                        }
+                    }
+                    Ok(Some(status))
+                } else {
+                    Ok(None)
+                }
             }
             NodeStateInternal::Host { .. } => {
                 use crate::host_state::HostState;
