@@ -68,4 +68,4 @@ pub mod types;
 pub use error::{ArenaError, Result};
 pub use node::{GameEngine, Node, NodeCommand};
 pub use session_ext::{NodeBuilder, SessionExt};
-pub use types::{NodeId, NodeInfo, NodeRole, NodeState, NodeStatus};
+pub use types::{NodeId, NodeInfo, NodeRole, NodeState};

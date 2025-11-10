@@ -2,7 +2,7 @@
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
 use crate::network::NodeLivelinessToken;
-use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
+use crate::types::{NodeId, NodeState, NodeStateInternal};
 
 /// Commands that can be sent to the node
 #[derive(Debug, Clone)]
@@ -112,14 +112,14 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 
     /// Execute one step of the node state machine
     ///
-    /// Processes commands from the command channel and returns the current node status.
+    /// Processes commands from the command channel and returns the current node state with optional game state.
     /// Returns when either:
     /// - A new game state is produced by the engine
     /// - The step timeout (configured in NodeConfig) elapses
     /// - A Stop command is received (returns None)
     ///
     /// Returns None if Stop command was received, indicating the node should shut down.
-    pub async fn step(&mut self) -> Result<Option<NodeStatus<E::State>>> {
+    pub async fn step(&mut self) -> Result<Option<NodeState<E::State>>> {
         // If force_host is enabled, only Host state is allowed
         if self.config.force_host && !matches!(self.state, NodeStateInternal::Host { .. }) {
             return Err(ArenaError::Internal(
@@ -154,15 +154,12 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             }
         };
         
-        // Update state with the next state returned from run() and generate NodeStatus
+        // Update state with the next state returned from run() and generate NodeState
         match next_result {
             Ok(Some(next_state)) => {
-                let status = NodeStatus {
-                    state: NodeState::from(&next_state),
-                    game_state: None,
-                };
+                let state = NodeState::from(&next_state);
                 self.state = next_state;
-                Ok(Some(status))
+                Ok(Some(state))
             }
             Ok(None) => Ok(None),
             Err(e) => Err(e),
@@ -377,18 +374,28 @@ mod tests {
         command_tx.send(NodeCommand::GameAction(100)).unwrap();
 
         // Call step to process first action
-        let status1 = node.step().await.unwrap();
-        assert!(status1.is_some());
-        let status1 = status1.unwrap();
-        assert!(status1.game_state.is_some());
-        assert_eq!(status1.game_state.unwrap(), "processed");
+        let _state1 = node.step().await.unwrap();
+        assert!(_state1.is_some());
+        
+        // Game state is now stored internally in HostState
+        if let NodeStateInternal::Host(host_state) = &node.state {
+            assert!(host_state.game_state.is_some());
+            assert_eq!(host_state.game_state.as_ref().unwrap(), &"processed");
+        } else {
+            panic!("Expected node to be in Host state");
+        }
 
         // Call step to process second action
-        let status2 = node.step().await.unwrap();
-        assert!(status2.is_some());
-        let status2 = status2.unwrap();
-        assert!(status2.game_state.is_some());
-        assert_eq!(status2.game_state.unwrap(), "processed");
+        let _state2 = node.step().await.unwrap();
+        assert!(_state2.is_some());
+        
+        // Game state is updated
+        if let NodeStateInternal::Host(host_state) = &node.state {
+            assert!(host_state.game_state.is_some());
+            assert_eq!(host_state.game_state.as_ref().unwrap(), &"processed");
+        } else {
+            panic!("Expected node to be in Host state");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
