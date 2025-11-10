@@ -14,3 +14,4 @@ bs58 = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
+markov_namegen = { workspace = true }

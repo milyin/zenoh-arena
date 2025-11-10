@@ -8,6 +8,7 @@ use crate::node::client_state::ClientState;
 use crate::error::{ArenaError, Result};
 use crate::node::host_state::HostState;
 use crate::node::node::GameEngine;
+use crate::node::name_generator;
 
 /// Unique node identifier
 ///
@@ -19,14 +20,12 @@ use crate::node::node::GameEngine;
 pub struct NodeId(String);
 
 impl NodeId {
-    /// Generate a new unique node ID (guaranteed to be keyexpr-safe)
-    /// Uses base58 encoding of UUID to avoid special characters
+    /// Generate a new unique node ID with human-readable name
+    /// Uses Markov chain-based name generation to create pronounceable,
+    /// fantasy-style names with a numeric suffix for uniqueness
     pub fn generate() -> Self {
-        let uuid = uuid::Uuid::new_v4();
-        let encoded = bs58::encode(uuid.as_bytes()).into_string();
-        // Take first 16 characters for reasonable length
-        let shortened = encoded.chars().take(16).collect::<String>();
-        NodeId(shortened)
+        let name = name_generator::generate_unique_name();
+        NodeId(name)
     }
 
     /// Create from a specific name (must be unique and keyexpr-compatible)
