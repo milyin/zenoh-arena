@@ -19,6 +19,7 @@ impl<T> std::fmt::Debug for NodeSubscriber<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeSubscriber")
             .field("type", &std::any::type_name::<T>())
+            .field("key_expr", &self.subscriber.key_expr())
             .finish()
     }
 }
