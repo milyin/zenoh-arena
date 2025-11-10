@@ -25,7 +25,7 @@ impl ClientState {
     /// - Host liveliness is lost (transitions back to SearchingHost)
     /// - The step timeout elapses
     /// - A Stop command is received (returns None)
-    pub(crate) async fn run<E>(
+    pub(crate) async fn step<E>(
         mut self,
         config: &NodeConfig,
         node_id: &NodeId,

@@ -133,7 +133,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                 use crate::searching_host_state::SearchingHostState;
                 let searching_state = SearchingHostState;
                 searching_state
-                    .run(
+                    .step(
                         &self.session,
                         &self.config,
                         &self.id,
@@ -144,12 +144,12 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             }
             NodeStateInternal::Client(client_state) => {
                 client_state
-                    .run::<E>(&self.config, &self.id, &self.command_rx)
+                    .step::<E>(&self.config, &self.id, &self.command_rx)
                     .await
             }
             NodeStateInternal::Host(host_state) => {
                 host_state
-                    .run(&self.config, &self.id, &self.session, &self.command_rx)
+                    .step(&self.config, &self.id, &self.session, &self.command_rx)
                     .await
             }
         };

@@ -14,7 +14,7 @@ impl SearchingHostState {
     /// Consumes self and returns the next state.
     /// Uses HostQuerier to find and connect to available hosts. If timeout expires or
     /// no hosts are available/accept connection, transitions to Host state.
-    pub(crate) async fn run<E>(
+    pub(crate) async fn step<E>(
         self,
         session: &zenoh::Session,
         config: &NodeConfig,

@@ -36,7 +36,7 @@ where
     /// - The step timeout elapses
     /// - A Stop command is received (returns None)
     /// - A client disconnects (handled and continues loop)
-    pub(crate) async fn run(
+    pub(crate) async fn step(
         mut self,
         config: &NodeConfig,
         node_id: &NodeId,
