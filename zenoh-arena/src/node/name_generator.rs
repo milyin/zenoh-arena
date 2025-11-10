@@ -3,18 +3,24 @@ use markov_namegen::{CharacterChainGenerator, RandomTextGenerator};
 
 /// Fantasy names for training data - mix of various cultures and fantasy settings
 const TRAINING_NAMES: &[&str] = &[
-    // Fantasy inspired
-    "Aldric", "Theron", "Gareth", "Mirabel", "Isolde", "Lysander", "Elowen", "Rowan",
-    "Caelum", "Astrid", "Eirik", "Freya", "Magnus", "Sigrid", "Bjorn", "Ingrid",
-    // Greek/Roman inspired
-    "Apollo", "Diana", "Atlas", "Selene", "Orion", "Luna", "Phoenix", "Aurora",
-    // Celtic inspired
-    "Finn", "Maeve", "Cormac", "Niamh", "Declan", "Siobhan", "Aidan", "Brigid",
-    // Nordic inspired
-    "Ragnar", "Skald", "Torsten", "Astrid", "Gunnar", "Helga", "Ivar", "Sigrun",
-    // More fantasy
-    "Zephyr", "Ember", "Storm", "Raven", "Wolf", "Bear", "Hawk", "Fox",
-    "Cedar", "Ash", "Oak", "Birch", "Willow", "Maple", "Pine", "Elm",
+    // Famous dragons from literature and media
+    "Smaug", "Ancalagon", "Glaurung", "Saphira", "Eragon", "Thorn", "Firnen", "Glaedr",
+    "Drogon", "Rhaegal", "Viserion", "Balerion", "Vhagar", "Meraxes", "Sunfyre", "Meleys",
+    "Caraxes", "Syrax", "Vermithrax", "Draco", "Falkor", "Toothless", "Hookfang", "Stormfly",
+    "Meatlug", "Barf", "Belch", "Alduin", "Paarthurnax", "Seath", "Kalameet", "Midir",
+    "Spyro", "Cynder", "Fafnir", "Nidhoggr", "Jormungandr", "Tiamat", "Bahamut",
+    // Asian dragons
+    "Shenlong", "Ryujin", "Mizuchi", "Kuraokami", "Watatsumi", "Zhulong", "Yinglong",
+    "Tianlong", "Fucanglong", "Dilong", "Panlong", "Jiaolong", "Qiulong",
+    // Mythology dragons
+    "Ladon", "Python", "Hydra", "Typhon", "Vritra", "Apalala", "Leviathan", "Quetzalcoatl",
+    "Apep", "Yamata", "Orochi", "Feilong", "Xiuhcoatl", "Zilant", "Zmey", "Gorynych",
+    // European legendary dragons
+    "Knucker", "Wyvern", "Lindworm", "Tatzelwurm", "Peluda", "Tarasque", "Gargouille",
+    "Cuelebre", "Guivre", "Bolla", "Kulshedra", "Balaur", "Zilant", "Zmaj", "Smok",
+    // Fantasy and games
+    "Alexstrasza", "Deathwing", "Ysera", "Malygos", "Nozdormu", "Neltharion",
+    "Ridley", "Grima", "Naga", "Dovahkiin", "Akatosh", "Parthurnax",
 ];
 
 /// Create a new name generator
@@ -22,7 +28,7 @@ fn create_name_generator() -> CharacterChainGenerator {
     CharacterChainGenerator::builder()
         .with_order(2)  // Use bigrams for smoother names
         .with_prior(0.01)  // Some randomness
-        .train(TRAINING_NAMES.iter().map(|s| *s))
+        .train(TRAINING_NAMES.iter().copied())
         .build()
 }
 
