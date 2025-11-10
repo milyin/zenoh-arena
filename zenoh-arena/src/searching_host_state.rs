@@ -3,7 +3,7 @@ use crate::config::NodeConfig;
 use crate::error::Result;
 use crate::network::HostQuerier;
 use crate::node::NodeCommand;
-use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
+use crate::types::{NodeId, NodeStateInternal};
 
 /// State while searching for available hosts
 pub(crate) struct SearchingHostState;
@@ -11,7 +11,7 @@ pub(crate) struct SearchingHostState;
 impl SearchingHostState {
     /// Process the SearchingHost state - search for available hosts and attempt to connect
     ///
-    /// Consumes self and returns the status along with the next state.
+    /// Consumes self and returns the next state.
     /// Uses HostQuerier to find and connect to available hosts. If timeout expires or
     /// no hosts are available/accept connection, transitions to Host state.
     pub(crate) async fn run<E>(
@@ -21,7 +21,7 @@ impl SearchingHostState {
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
         get_engine: &dyn Fn() -> E,
-    ) -> Result<Option<(NodeStatus<E::State>, NodeStateInternal<E>)>>
+    ) -> Result<Option<NodeStateInternal<E>>>
     where
         E: crate::node::GameEngine,
     {
@@ -95,13 +95,7 @@ impl SearchingHostState {
                     node_id.clone(),
                 )
                 .await?;
-            Ok(Some((
-                NodeStatus {
-                    state: NodeState::from(&next_state),
-                    game_state: None,
-                },
-                next_state,
-            )))
+            Ok(Some(next_state))
         } else {
             // Transition to Host state
             let mut next_state = NodeStateInternal::SearchingHost;
@@ -113,13 +107,7 @@ impl SearchingHostState {
                     node_id,
                 )
                 .await?;
-            Ok(Some((
-                NodeStatus {
-                    state: NodeState::from(&next_state),
-                    game_state: None,
-                },
-                next_state,
-            )))
+            Ok(Some(next_state))
         }
     }
 }

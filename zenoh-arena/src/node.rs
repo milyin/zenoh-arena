@@ -2,7 +2,7 @@
 use crate::config::NodeConfig;
 use crate::error::{ArenaError, Result};
 use crate::network::NodeLivelinessToken;
-use crate::types::{NodeId, NodeStateInternal, NodeStatus};
+use crate::types::{NodeId, NodeState, NodeStateInternal, NodeStatus};
 
 /// Commands that can be sent to the node
 #[derive(Debug, Clone)]
@@ -143,12 +143,9 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
                     .await
             }
             NodeStateInternal::Client(client_state) => {
-                let result = client_state
+                client_state
                     .run::<E>(&self.config, &self.id, &self.command_rx)
-                    .await?;
-                
-                // Return the result as-is since it's already in the right format
-                Ok(result)
+                    .await
             }
             NodeStateInternal::Host(host_state) => {
                 host_state
@@ -157,9 +154,13 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             }
         };
         
-        // Update state with the next state returned from run()
+        // Update state with the next state returned from run() and generate NodeStatus
         match next_result {
-            Ok(Some((status, next_state))) => {
+            Ok(Some(next_state)) => {
+                let status = NodeStatus {
+                    state: NodeState::from(&next_state),
+                    game_state: None,
+                };
                 self.state = next_state;
                 Ok(Some(status))
             }
