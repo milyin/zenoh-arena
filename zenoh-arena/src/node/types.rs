@@ -24,7 +24,7 @@ impl NodeId {
     /// Uses Markov chain-based name generation to create pronounceable,
     /// fantasy-style names with a numeric suffix for uniqueness
     pub fn generate() -> Self {
-        let name = name_generator::generate_unique_name();
+        let name = name_generator::generate_random_name();
         NodeId(name)
     }
 

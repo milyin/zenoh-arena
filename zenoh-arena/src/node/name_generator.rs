@@ -8,7 +8,7 @@ const TRAINING_NAMES: &[&str] = &[
     "Drogon", "Rhaegal", "Viserion", "Balerion", "Vhagar", "Meraxes", "Sunfyre", "Meleys",
     "Caraxes", "Syrax", "Vermithrax", "Draco", "Falkor", "Toothless", "Hookfang", "Stormfly",
     "Meatlug", "Barf", "Belch", "Alduin", "Paarthurnax", "Seath", "Kalameet", "Midir",
-    "Spyro", "Cynder", "Fafnir", "Nidhoggr", "Jormungandr", "Tiamat", "Bahamut",
+    "Spyro", "Cynder", "Fafnir", "Nidhoggr", "Jormungandr", "Tiamat", "Bahamut", "Melanchthon", 
     // Asian dragons
     "Shenlong", "Ryujin", "Mizuchi", "Kuraokami", "Watatsumi", "Zhulong", "Yinglong",
     "Tianlong", "Fucanglong", "Dilong", "Panlong", "Jiaolong", "Qiulong",
@@ -62,16 +62,6 @@ pub fn generate_random_name() -> String {
     }
 }
 
-/// Generate a random name with a numeric suffix for uniqueness
-/// 
-/// Creates a name like "Theron_42" or "Aldric_123" to ensure uniqueness
-/// while maintaining human readability.
-pub fn generate_unique_name() -> String {
-    let base_name = generate_random_name();
-    let suffix: u16 = rand::random::<u16>() % 1000;
-    format!("{}_{}", base_name, suffix)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,22 +75,9 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_unique_name() {
-        let name = generate_unique_name();
-        assert!(!name.is_empty());
-        assert!(name.contains('_'));
-        
-        // Verify format: name_number
-        let parts: Vec<&str> = name.split('_').collect();
-        assert_eq!(parts.len(), 2);
-        assert!(parts[0].chars().all(|c| c.is_alphanumeric()));
-        assert!(parts[1].chars().all(|c| c.is_numeric()));
-    }
-
-    #[test]
     fn test_names_are_different() {
         // Generate multiple names and ensure they're not all the same
-        let names: Vec<String> = (0..10).map(|_| generate_unique_name()).collect();
+        let names: Vec<String> = (0..1000).map(|_| generate_random_name()).collect();
         let unique_count = names.iter().collect::<std::collections::HashSet<_>>().len();
         assert!(unique_count > 5, "Should generate reasonably unique names");
     }

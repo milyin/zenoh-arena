@@ -19,6 +19,9 @@ pub trait SessionExt {
     /// #     fn process_action(&mut self, _: Self::Action, _: &zenoh_arena::NodeId) -> zenoh_arena::Result<Self::State> {
     /// #         Ok("state".to_string())
     /// #     }
+    /// #     fn max_clients(&self) -> Option<usize> {
+    /// #         None // Unlimited clients
+    /// #     }
     /// # }
     /// # async fn example() {
     /// let session = zenoh::open(zenoh::Config::default()).await.unwrap();

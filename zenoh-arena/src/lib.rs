@@ -33,6 +33,10 @@
 //!     fn process_action(&mut self, action: Self::Action, _client_id: &NodeId) -> Result<Self::State> {
 //!         Ok(format!("Processed: {}", action))
 //!     }
+//! 
+//!     fn max_clients(&self) -> Option<usize> {
+//!         None // Unlimited clients
+//!     }
 //! }
 //!
 //! #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
