@@ -1,13 +1,16 @@
 //! Liveliness token management
 
 use crate::error::Result;
-use crate::network::keyexpr::KeyexprNode;
+use crate::network::keyexpr::{KeyexprNode, NodeType};
 use crate::node::types::NodeId;
 use futures::future::select_all;
 use std::pin::Pin;
 use zenoh::key_expr::KeyExpr;
 use zenoh::liveliness::LivelinessToken;
 use zenoh::sample::SampleKind;
+use zenoh::pubsub::Subscriber;
+use zenoh::handlers::FifoChannelHandler;
+use zenoh::sample::Sample;
 
 /// Wrapper around Zenoh's LivelinessToken for a node
 ///
@@ -26,10 +29,12 @@ impl NodeLivelinessToken {
     /// If a conflict is detected, returns a LivelinessTokenConflict error.
     pub async fn declare(
         session: &zenoh::Session,
-        keyexpr: KeyexprNode,
+        prefix: impl Into<KeyExpr<'static>>,
+        node_type: NodeType,
+        node_id: NodeId,
     ) -> Result<Self> {
-        let node_id = keyexpr.node().clone().expect("node_id must be specified for liveliness token");
-        let keyexpr: KeyExpr = keyexpr.into();
+        let keyexpr_node = KeyexprNode::new(prefix.into(), node_type, Some(node_id.clone()));
+        let keyexpr: KeyExpr = keyexpr_node.into();
 
         // Check if another token with the same keyexpr already exists
         let replies = session
@@ -68,7 +73,7 @@ impl NodeLivelinessToken {
 /// - Hosts to detect when any client disconnects (wildcard pattern)
 #[derive(Debug)]
 pub struct NodeLivelinessWatch {
-    subscribers: Vec<zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>>,
+    subscribers: Vec<Subscriber<FifoChannelHandler<Sample>>>,
 }
 
 impl NodeLivelinessWatch {
@@ -86,15 +91,18 @@ impl NodeLivelinessWatch {
     /// Multiple subscribers can be added via repeated calls to this method.
     ///
     /// The keyexpr can be:
-    /// - Specific: with node() returning Some(id) to track a single node
-    /// - Wildcard: with node() returning None to track all nodes matching the pattern
+    /// - Specific: with node_id as Some(id) to track a single node
+    /// - Wildcard: with node_id as None to track all nodes matching the pattern
     pub async fn subscribe(
         &mut self,
         session: &zenoh::Session,
-        keyexpr: KeyexprNode,
+        prefix: impl Into<KeyExpr<'static>>,
+        node_type: NodeType,
+        node_id: Option<NodeId>,
     ) -> Result<()>
     {
-        let keyexpr: KeyExpr = keyexpr.into();
+        let keyexpr_node = KeyexprNode::new(prefix.into(), node_type, node_id);
+        let keyexpr: KeyExpr = keyexpr_node.into();
 
         let subscriber = session
             .liveliness()

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::{network::{host_queryable::HostRequest, NodeSubscriber}, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
 use crate::error::Result;
-use crate::network::keyexpr::{KeyexprNode, NodeType};
+use crate::network::keyexpr::NodeType;
 
 /// State while acting as a host
 pub(crate) struct HostState<E>
@@ -181,12 +181,13 @@ where
                     host_state.connected_clients.push(client_id.clone());
 
                     // Subscribe to liveliness events for the client so we can detect disconnects
-                    let client_keyexpr = KeyexprNode::new(config.keyexpr_prefix.clone(), NodeType::Client, Some(client_id.clone()));
                     match host_state
                         .client_liveliness_watch
                         .subscribe(
                             session,
-                            client_keyexpr,
+                            config.keyexpr_prefix.clone(),
+                            NodeType::Client,
+                            Some(client_id.clone()),
                         )
                         .await
                     {

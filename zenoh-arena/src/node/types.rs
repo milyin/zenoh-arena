@@ -5,7 +5,7 @@ use zenoh::key_expr::KeyExpr;
 
 use crate::error::{ArenaError, Result};
 use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
-use crate::network::keyexpr::{KeyexprNode, LinkType, NodeType};
+use crate::network::keyexpr::{LinkType, NodeType};
 use crate::node::client_state::ClientState;
 use crate::node::host_state::HostState;
 use crate::node::node::GameEngine;
@@ -206,9 +206,8 @@ where
         let prefix = prefix.into();
 
         // Create host liveliness token for discovery
-        let host_keyexpr = KeyexprNode::new(prefix.clone(), NodeType::Host, Some(node_id.clone()));
         let token =
-            NodeLivelinessToken::declare(session, host_keyexpr)
+            NodeLivelinessToken::declare(session, prefix.clone(), NodeType::Host, node_id.clone())
                 .await?;
 
         // Declare queryable for host discovery
@@ -247,15 +246,13 @@ where
 
         // Create and subscribe to liveliness events for the host
         let mut liveliness_watch = NodeLivelinessWatch::new();
-        let host_keyexpr = KeyexprNode::new(prefix.clone(), NodeType::Host, Some(host_id.clone()));
         liveliness_watch
-            .subscribe(session, host_keyexpr)
+            .subscribe(session, prefix.clone(), NodeType::Host, Some(host_id.clone()))
             .await?;
 
         // Declare client liveliness token (type: Client) so host can track our presence
-        let client_keyexpr = KeyexprNode::new(prefix.clone(), NodeType::Client, Some(client_id.clone()));
         let liveliness_token =
-            NodeLivelinessToken::declare(session, client_keyexpr).await?;
+            NodeLivelinessToken::declare(session, prefix.clone(), NodeType::Client, client_id.clone()).await?;
 
         // Create publisher for sending actions to the host
         let action_publisher = NodePublisher::new(

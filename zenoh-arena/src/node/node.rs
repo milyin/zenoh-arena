@@ -1,7 +1,7 @@
 /// Node management module
 use super::config::NodeConfig;
 use crate::error::{ArenaError, Result};
-use crate::network::{KeyexprNode, NodeLivelinessToken};
+use crate::network::NodeLivelinessToken;
 use crate::network::keyexpr::NodeType;
 use crate::node::searching_host_state::SearchingHostState;
 use super::types::{NodeId, NodeState, NodeStateInternal};
@@ -59,10 +59,11 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 
         // Create liveliness token for this node's identity (NodeType::Node)
         // This protects the node name from conflicts with other nodes
-        let node_keyexpr = KeyexprNode::new(config.keyexpr_prefix.clone(), NodeType::Node, Some(id.clone()));
         let node_liveliness_token = NodeLivelinessToken::declare(
             &session,
-            node_keyexpr,
+            config.keyexpr_prefix.clone(),
+            NodeType::Node,
+            id.clone(),
         )
         .await?;
 
