@@ -30,6 +30,30 @@ impl<E> HostState<E>
 where
     E: GameEngine,
 {
+    /// Check if host has capacity for more clients
+    ///
+    /// Returns true if the current client count is below the maximum allowed.
+    /// Returns true if there's no maximum (unlimited clients).
+    pub(crate) fn has_capacity(&self) -> bool {
+        match self.engine.max_clients() {
+            None => true, // Unlimited clients
+            Some(max_count) => self.connected_clients.len() < max_count,
+        }
+    }
+
+    /// Check if host is accepting new clients
+    ///
+    /// Host is accepting when it has a queryable (is advertised) and has capacity for more clients.
+    /// Returns false if queryable is not present or if client count is at or above max_clients.
+    pub(crate) fn is_accepting_clients(&self) -> bool {
+        // Only accepting if queryable is present (advertised)
+        if self.queryable.is_none() {
+            return false;
+        }
+        // Check if we have capacity
+        self.has_capacity()
+    }
+
     /// Process the Host state - handle client connections and game actions
     ///
     /// Consumes self and returns the next state (Host or Stop if stopped).
@@ -138,20 +162,18 @@ where
         session: &zenoh::Session,
         request: HostRequest,
     ) -> Result<()> {
-        let current_count = host_state.connected_clients.len();
-        let max_allowed = host_state.engine.max_clients();
-
-        let should_accept = max_allowed.map(|max| current_count < max).unwrap_or(true); // Accept if no limit
+        let should_accept = host_state.has_capacity();
 
         if should_accept {
             match request.accept().await {
                 Ok(client_id) => {
+                    let max_clients = host_state.engine.max_clients();
                     tracing::info!(
                         "Node '{}' accepted connection from client '{}' ({}/{})",
                         node_id,
                         client_id,
                         host_state.connected_clients.len() + 1,
-                        max_allowed
+                        max_clients
                             .map(|m| m.to_string())
                             .unwrap_or_else(|| "unlimited".to_string())
                     );
@@ -186,13 +208,7 @@ where
                     }
 
                     // Update queryable if we've reached capacity
-                    let new_count = host_state.connected_clients.len();
-                    let has_capacity = match max_allowed {
-                        None => true, // Unlimited clients
-                        Some(max_count) => new_count < max_count,
-                    };
-
-                    if !has_capacity && host_state.queryable.is_some() {
+                    if !host_state.has_capacity() && host_state.queryable.is_some() {
                         host_state.queryable = None;
                         tracing::debug!("Host '{}' capacity reached (dropped queryable)", node_id);
                     }
@@ -202,12 +218,14 @@ where
                 }
             }
         } else {
+            let current_count = host_state.connected_clients.len();
+            let max_clients = host_state.engine.max_clients();
             tracing::info!(
                 "Node '{}' rejected connection from client '{}' (limit reached: {}/{})",
                 node_id,
                 request.client_id().as_str(),
                 current_count,
-                max_allowed.unwrap_or(0)
+                max_clients.unwrap_or(0)
             );
             if let Err(e) = request.reject("Maximum number of clients reached").await {
                 tracing::warn!("Node '{}' failed to reject connection: {:?}", node_id, e);
@@ -245,12 +263,8 @@ where
             );
         }
 
-        let has_capacity = match host_state.engine.max_clients() {
-            None => true,
-            Some(max) => host_state.connected_clients.len() < max,
-        };
-
-        if has_capacity && host_state.queryable.is_none() {
+        // Resume accepting clients if we now have capacity and queryable was dropped
+        if host_state.has_capacity() && host_state.queryable.is_none() {
             let new_queryable = crate::network::HostQueryable::declare(
                 session,
                 config.keyexpr_prefix.clone(),

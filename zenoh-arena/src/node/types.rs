@@ -184,29 +184,6 @@ impl<E> NodeStateInternal<E>
 where
     E: GameEngine,
 {
-    /// Check if host mode and accepting clients
-    ///
-    /// Host is accepting when it has a queryable and client count is below max_clients
-    pub fn is_accepting_clients(&self) -> bool {
-        match self {
-            NodeStateInternal::Host(host_state) => {
-                // Only accepting if queryable is present (advertised)
-                if host_state.queryable.is_none() {
-                    return false;
-                }
-
-                // Check if we have capacity
-                let max = host_state.engine.max_clients();
-                let current = host_state.connected_clients.len();
-                match max {
-                    None => true, // Unlimited clients
-                    Some(max_count) => current < max_count,
-                }
-            }
-            _ => false,
-        }
-    }
-
     /// Transition to SearchingHost state from any state
     ///
     /// Drops the current state (including engine and liveliness token if in Host mode)
@@ -309,18 +286,9 @@ where
                 host_id: client_state.host_id.clone(),
             },
             NodeStateInternal::Host(host_state) => {
-                // Host is accepting if it has a queryable and has capacity
-                let is_accepting = host_state.queryable.is_some() && {
-                    let max = host_state.engine.max_clients();
-                    let current = host_state.connected_clients.len();
-                    match max {
-                        None => true, // Unlimited clients
-                        Some(max_count) => current < max_count,
-                    }
-                };
-
+                // Use the centralized is_accepting_clients() method
                 NodeState::Host {
-                    is_accepting,
+                    is_accepting: host_state.is_accepting_clients(),
                     connected_clients: host_state.connected_clients.clone(),
                     game_state: host_state.game_state.clone(),
                 }
