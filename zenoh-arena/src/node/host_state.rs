@@ -1,7 +1,7 @@
 /// Host state implementation
 use std::sync::Arc;
 
-use crate::{network::{host_queryable::HostRequest, NodePublisher, NodeSubscriber}, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
+use crate::{network::{host_queryable::HostRequest, NodePublisher, NodeSubscriber}, node::{config::NodeConfig, game_engine::GameEngine, node::NodeCommand, types::{NodeId, NodeStateInternal}}};
 use crate::error::Result;
 use crate::network::keyexpr::NodeType;
 

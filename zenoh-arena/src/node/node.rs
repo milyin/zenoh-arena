@@ -1,5 +1,6 @@
 /// Node management module
 use super::config::NodeConfig;
+use super::game_engine::GameEngine;
 use crate::error::{ArenaError, Result};
 use crate::network::NodeLivelinessToken;
 use crate::network::keyexpr::NodeType;
@@ -169,23 +170,10 @@ impl<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E:
     }
 }
 
-/// Trait for game engine integration
-///
-/// The engine runs only on the host node and processes actions from clients via channels
-pub trait GameEngine: Send + Sync {
-    /// Action type from user/client
-    type Action: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send;
-
-    /// State type sent to clients
-    type State: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone;
-
-    /// Maximum number of clients allowed (None = unlimited)
-    fn max_clients(&self) -> Option<usize>;
-}
-
 #[cfg(test)]
 mod tests {
     use crate::node::session_ext::SessionExt;
+    use super::GameEngine;
 
     use super::*;
 

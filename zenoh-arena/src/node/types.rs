@@ -7,8 +7,8 @@ use crate::error::{ArenaError, Result};
 use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
 use crate::network::keyexpr::{LinkType, NodeType};
 use crate::node::client_state::ClientState;
+use crate::node::game_engine::GameEngine;
 use crate::node::host_state::HostState;
-use crate::node::node::GameEngine;
 use crate::node::name_generator;
 
 /// Unique node identifier

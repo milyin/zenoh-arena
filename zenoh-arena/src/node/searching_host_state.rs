@@ -2,7 +2,8 @@
 use super::config::NodeConfig;
 use crate::error::Result;
 use crate::network::HostQuerier;
-use super::node::{GameEngine, NodeCommand};
+use super::game_engine::GameEngine;
+use super::node::NodeCommand;
 use super::types::{NodeId, NodeStateInternal};
 use rand::Rng;
 
