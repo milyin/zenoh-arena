@@ -1,3 +1,4 @@
+pub mod engine;
 mod frequency_regulator;
 mod state;
 mod term_render;

@@ -5,4 +5,13 @@ version.workspace = true
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 rand = "0.8"
+zenoh = { workspace = true }
+zenoh-ext = { workspace = true }
+zenoh-arena = { path = "../zenoh-arena" }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+tracing-subscriber = "0.3"
+anyhow = "1.0"
+console = "0.15"
