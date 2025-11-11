@@ -5,7 +5,7 @@ use std::time::Duration;
 use z_tetris::engine::{TetrisAction, TetrisEngine};
 use z_tetris::{Action, AnsiTermStyle, GameFieldPair, TermRender, TetrisPairState};
 use zenoh::key_expr::KeyExpr;
-use zenoh_arena::{NodeCommand, NodeState, SessionExt};
+use zenoh_arena::{Node, NodeCommand, NodeState, SessionExt};
 
 /// z_tetris - Zenoh Arena Tetris Game
 #[derive(Parser, Debug)]
@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut node_builder = session
         .declare_arena_node(TetrisEngine::new)
         .force_host(args.force_host)
-        .step_timeout_ms(100); // Faster updates for game responsiveness
+        .step_timeout_ms(1000);
 
     // Apply name if provided
     if let Some(name) = args.name.clone() {
@@ -130,17 +130,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Node stopped");
                 break;
             }
-            NodeState::Host { game_state: Some(state), .. } 
-            | NodeState::Client { game_state: Some(state), .. } => {
+            NodeState::Host {
+                game_state: None,
+                ..
+            } | NodeState::Client { game_state: None, .. } => {
+                // No game state to render yet
+            }
+            NodeState::Host {
+                game_state: Some(state),
+                ..
+            } => {
                 // Render the game state
                 if last_render.elapsed() >= render_interval {
                     render_game(&render_term, &state)?;
                     last_render = std::time::Instant::now();
                 }
             }
-            _ => {
-                // Other states - just wait a bit
-                tokio::time::sleep(Duration::from_millis(10)).await;
+            NodeState::Client {
+                game_state: Some(state),
+                ..
+            } => {
+                // Render the game state
+                if last_render.elapsed() >= render_interval {
+                    render_game(&render_term, &state)?;
+                    last_render = std::time::Instant::now();
+                }
+            }
+            NodeState::SearchingHost => {
+                // Clear rendering terminal while searching
+                render_term.clear_screen()?;
+                render_term.move_cursor_to(0, 0)?;
+                render_term.write_line("Searching for host...")?;
+                render_term.flush()?;
             }
         }
     }
@@ -160,13 +181,13 @@ fn render_game(term: &Term, state: &TetrisPairState) -> Result<(), Box<dyn std::
         vec!["OPPONENT".to_string()],
     );
     let lines = field.render(&AnsiTermStyle);
-    
+
     // Clear and render
     term.move_cursor_to(0, 0)?;
     for line in lines {
         term.write_line(&line)?;
     }
     term.flush()?;
-    
+
     Ok(())
 }

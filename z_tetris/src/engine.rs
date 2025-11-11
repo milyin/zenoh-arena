@@ -32,6 +32,12 @@ impl TetrisEngine {
     }
 }
 
+impl Default for TetrisEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GameEngine for TetrisEngine {
     type Action = TetrisAction;
     type State = TetrisPairState;
