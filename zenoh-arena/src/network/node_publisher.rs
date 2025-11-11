@@ -32,7 +32,7 @@ where
     ///
     /// Immediately declares a Zenoh publisher for the link keyexpr constructed from
     /// the given prefix, sender node ID, and receiver node ID. The keyexpr pattern will be:
-    /// `<prefix>/link/<sender_id>/<receiver_id>` (sender_id, receiver_id)
+    /// `<prefix>/link/<receiver_id>/<sender_id>` (receiver_id, sender_id)
     /// to send messages to the specified remote node.
     pub async fn new(
         session: &zenoh::Session,
@@ -40,11 +40,11 @@ where
         sender_id: &NodeId,
         receiver_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/link/<sender_id>/<receiver_id>
+        // Construct Link keyexpr: <prefix>/link/<receiver_id>/<sender_id>
         let node_keyexpr = KeyexprLink::new(
             prefix,
-            Some(sender_id.clone()),
             Some(receiver_id.clone()),
+            Some(sender_id.clone()),
         );
         let keyexpr: KeyExpr = node_keyexpr.into();
 

@@ -1,7 +1,5 @@
-mod engine;
-
 use clap::Parser;
-use engine::{BonjourAction, BonjourEngine};
+use z_bonjour::engine::{BonjourAction, BonjourEngine};
 use std::io::{self, Read};
 use std::path::PathBuf;
 use zenoh::key_expr::KeyExpr;
