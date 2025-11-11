@@ -1,7 +1,7 @@
-//! Publisher for node data with serialization
+//! Publisher for sending actions to a remote node
 
 use crate::error::Result;
-use crate::network::keyexpr::KeyexprLink;
+use crate::network::keyexpr::{KeyexprLink, LinkType};
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
@@ -28,11 +28,10 @@ impl<T> NodePublisher<T>
 where
     T: zenoh_ext::Serialize,
 {
-    /// Create a new publisher for a Link keyexpr
+    /// Create a new NodePublisher
     ///
-    /// Immediately declares a Zenoh publisher for the link keyexpr constructed from
-    /// the given prefix, sender node ID, and receiver node ID. The keyexpr pattern will be:
-    /// `<prefix>/link/<receiver_id>/<sender_id>` (receiver_id, sender_id)
+    /// Declares a publisher on keyexpr:
+    /// `<prefix>/action/<sender_id>/<receiver_id>` (sender_id, receiver_id)
     /// to send messages to the specified remote node.
     pub async fn new(
         session: &zenoh::Session,
@@ -40,15 +39,14 @@ where
         sender_id: &NodeId,
         receiver_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/link/<receiver_id>/<sender_id>
+        // Construct Link keyexpr: <prefix>/action/<sender_id>/<receiver_id>
         let node_keyexpr = KeyexprLink::new(
             prefix,
-            Some(receiver_id.clone()),
+            LinkType::Action,
             Some(sender_id.clone()),
+            Some(receiver_id.clone()),
         );
-        let keyexpr: KeyExpr = node_keyexpr.into();
-
-        let publisher = session
+        let keyexpr: KeyExpr = node_keyexpr.into();        let publisher = session
             .declare_publisher(keyexpr)
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;

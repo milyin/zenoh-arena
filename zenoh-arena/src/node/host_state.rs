@@ -1,8 +1,9 @@
 /// Host state implementation
 use std::sync::Arc;
 
-use crate::{network::{host_queryable::HostRequest, KeyexprClient, NodeSubscriber}, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
+use crate::{network::{host_queryable::HostRequest, NodeSubscriber}, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
 use crate::error::Result;
+use crate::network::keyexpr::{KeyexprNode, NodeType};
 
 /// State while acting as a host
 pub(crate) struct HostState<E>
@@ -17,8 +18,8 @@ where
     pub(crate) _liveliness_token: Option<crate::network::NodeLivelinessToken>,
     /// Queryable for host discovery
     pub(crate) queryable: Option<Arc<crate::network::HostQueryable>>,
-    /// Multinode liveliness watch to detect any client disconnect
-    pub(crate) client_liveliness_watch: crate::network::NodeLivelinessWatch<KeyexprClient>,
+    /// Liveliness watch to detect any client disconnect
+    pub(crate) client_liveliness_watch: crate::network::NodeLivelinessWatch,
     /// Subscriber to receive actions from clients
     pub(crate) action_subscriber: NodeSubscriber<E::Action>,
     /// Current game state from the engine
@@ -158,7 +159,7 @@ where
                     host_state.connected_clients.push(client_id.clone());
 
                     // Subscribe to liveliness events for the client so we can detect disconnects
-                    let client_keyexpr = KeyexprClient::new(config.keyexpr_prefix.clone(), Some(client_id.clone()));
+                    let client_keyexpr = KeyexprNode::new(config.keyexpr_prefix.clone(), NodeType::Client, Some(client_id.clone()));
                     match host_state
                         .client_liveliness_watch
                         .subscribe(

@@ -1,14 +1,14 @@
 //! Subscriber for node data with deserialization
 
 use crate::error::Result;
-use crate::network::keyexpr::{KeyexprLink, KeyexprNode2Trait};
+use crate::network::keyexpr::{KeyexprLink, LinkType};
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
 /// Subscribes to a Zenoh key expression and deserializes received data
 ///
 /// This subscriber automatically deserializes received samples into type T.
-/// Uses a glob subscription pattern: subscribes to `<prefix>/link/<receiver_id>/*`
+/// Uses a glob subscription pattern: subscribes to `<prefix>/action/*/<receiver_id>`
 /// to receive messages from any sender to the specified receiver.
 /// The `recv()` method returns both the sender ID and the deserialized value.
 pub struct NodeSubscriber<T> {
@@ -32,15 +32,15 @@ where
     /// Create a new subscriber for a Link keyexpr with receiver_id
     ///
     /// Declares a Zenoh subscriber for the link keyexpr pattern:
-    /// `<prefix>/link/<receiver_id>/*` (receiver_id=node_id, sender_id=wildcard)
+    /// `<prefix>/action/*/<receiver_id>` (sender_id=wildcard, receiver_id=node_id)
     /// to receive all messages sent to the specified receiver from any sender.
     pub async fn new(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         receiver_node_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/link/<receiver_id>/* (receiver_id, sender_id=*)
-        let node_keyexpr = KeyexprLink::new(prefix, Some(receiver_node_id.clone()), None);
+        // Construct Link keyexpr: <prefix>/action/*/<receiver_id> (sender_id=*, receiver_id)
+        let node_keyexpr = KeyexprLink::new(prefix, LinkType::Action, None, Some(receiver_node_id.clone()));
         let keyexpr: KeyExpr = node_keyexpr.into();
 
         let subscriber = session
@@ -69,9 +69,9 @@ where
             .await
             .map_err(|e| crate::error::ArenaError::Internal(format!("Failed to receive sample: {}", e)))?;
 
-        // Parse the keyexpr to extract sender_id
+        // Parse the keyexpr to extract sender_id (node_src)
         let keyexpr_link = KeyexprLink::try_from(sample.key_expr().clone().into_owned())?;
-        let sender_id = keyexpr_link.node2_id()
+        let sender_id = keyexpr_link.node_src()
             .clone()
             .ok_or_else(|| crate::error::ArenaError::Internal(
                 format!("Received sample with wildcard sender_id in keyexpr '{}'", sample.key_expr())

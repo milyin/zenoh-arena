@@ -1,7 +1,7 @@
 //! Liveliness token management
 
 use crate::error::Result;
-use crate::network::keyexpr::KeyexprNodeTrait;
+use crate::network::keyexpr::KeyexprNode;
 use crate::node::types::NodeId;
 use futures::future::select_all;
 use std::pin::Pin;
@@ -26,11 +26,11 @@ impl NodeLivelinessToken {
     /// Before creating the token, performs a liveliness.get() request to check if
     /// another token with the same keyexpr already exists in the network.
     /// If a conflict is detected, returns a LivelinessTokenConflict error.
-    pub async fn declare<K: Into<KeyExpr<'static>> + KeyexprNodeTrait>(
+    pub async fn declare(
         session: &zenoh::Session,
-        keyexpr: K,
+        keyexpr: KeyexprNode,
     ) -> Result<Self> {
-        let node_id = keyexpr.node_id().clone().expect("node_id must be specified for liveliness token");
+        let node_id = keyexpr.node().clone().expect("node_id must be specified for liveliness token");
         let keyexpr: KeyExpr = keyexpr.into();
 
         // Check if another token with the same keyexpr already exists
@@ -68,28 +68,16 @@ impl NodeLivelinessToken {
 /// This is used by:
 /// - Clients to detect when their connected host goes offline (specific node_id)
 /// - Hosts to detect when any client disconnects (wildcard pattern)
-///
-/// Type parameter `K` must implement `KeyexprNodeTrait` and can be parsed from received samples
-/// to extract the node ID.
-pub struct NodeLivelinessWatch<K: KeyexprNodeTrait> {
+#[derive(Debug)]
+pub struct NodeLivelinessWatch {
     subscribers: Vec<zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>>,
-    _phantom: std::marker::PhantomData<K>,
 }
 
-impl<K: KeyexprNodeTrait> std::fmt::Debug for NodeLivelinessWatch<K> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeLivelinessWatch")
-            .field("num_subscribers", &self.subscribers.len())
-            .finish()
-    }
-}
-
-impl<K: KeyexprNodeTrait + Into<KeyExpr<'static>>> NodeLivelinessWatch<K> {
+impl NodeLivelinessWatch {
     /// Create a new liveliness watch without any subscribers
     pub fn new() -> Self {
         Self {
             subscribers: Vec::new(),
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -100,12 +88,12 @@ impl<K: KeyexprNodeTrait + Into<KeyExpr<'static>>> NodeLivelinessWatch<K> {
     /// Multiple subscribers can be added via repeated calls to this method.
     ///
     /// The keyexpr can be:
-    /// - Specific: with node_id() returning Some(id) to track a single node
-    /// - Wildcard: with node_id() returning None to track all nodes matching the pattern
+    /// - Specific: with node() returning Some(id) to track a single node
+    /// - Wildcard: with node() returning None to track all nodes matching the pattern
     pub async fn subscribe(
         &mut self,
         session: &zenoh::Session,
-        keyexpr: K,
+        keyexpr: KeyexprNode,
     ) -> Result<()>
     {
         let keyexpr: KeyExpr = keyexpr.into();
@@ -136,12 +124,10 @@ impl<K: KeyexprNodeTrait + Into<KeyExpr<'static>>> NodeLivelinessWatch<K> {
     /// indicating a node's liveliness token has been dropped and the node is
     /// no longer available. This method returns when any subscriber detects disconnection.
     ///
-    /// The node ID is extracted by parsing the sample's keyexpr as type K.
+    /// The node ID is extracted by parsing the sample's keyexpr as KeyexprNode.
     ///
     /// Returns the node ID that disconnected.
     pub async fn disconnected(&mut self) -> Result<NodeId>
-    where
-        K: TryFrom<KeyExpr<'static>, Error = crate::error::ArenaError>,
     {
         if self.subscribers.is_empty() {
             return Err(crate::error::ArenaError::LivelinessError(
@@ -158,8 +144,8 @@ impl<K: KeyexprNodeTrait + Into<KeyExpr<'static>>> NodeLivelinessWatch<K> {
                     loop {
                         match subscriber.recv_async().await {
                             Ok(sample) => {
-                                // Extract node_id from the sample's keyexpr by parsing it as type K
-                                let keyexpr_k = match K::try_from(sample.key_expr().clone().into_owned()) {
+                                // Extract node_id from the sample's keyexpr by parsing it as KeyexprNode
+                                let keyexpr_node = match KeyexprNode::try_from(sample.key_expr().clone().into_owned()) {
                                     Ok(k) => k,
                                     Err(e) => {
                                         tracing::warn!(
@@ -171,11 +157,11 @@ impl<K: KeyexprNodeTrait + Into<KeyExpr<'static>>> NodeLivelinessWatch<K> {
                                     }
                                 };
 
-                                let node_id = match keyexpr_k.node_id() {
+                                let node_id = match keyexpr_node.node() {
                                     Some(id) => id.clone(),
                                     None => {
                                         tracing::warn!(
-                                            "Received sample with wildcard node_id in keyexpr '{}'",
+                                            "Received sample with wildcard node in keyexpr '{}'",
                                             sample.key_expr()
                                         );
                                         continue;

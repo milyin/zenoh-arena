@@ -1,7 +1,7 @@
 /// Client state implementation
 use crate::node::config::NodeConfig;
 use crate::error::Result;
-use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, KeyexprHost, NodePublisher};
+use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, NodePublisher};
 use crate::node::node::{GameEngine, NodeCommand};
 use crate::node::types::{NodeId, NodeStateInternal};
 
@@ -10,8 +10,8 @@ pub(crate) struct ClientState<Action> {
     /// ID of the host we're connected to
     pub(crate) host_id: NodeId,
     /// Watches for host liveliness to detect disconnection
-    pub(crate) liveliness_watch: NodeLivelinessWatch<KeyexprHost>,
-    /// Client's liveliness token (role: Client) for the host to track disconnection
+    pub(crate) liveliness_watch: NodeLivelinessWatch,
+    /// Client's liveliness token (type: Client) for the host to track disconnection
     #[allow(dead_code)]
     pub(crate) liveliness_token: NodeLivelinessToken,
     /// Publisher for sending actions to the host

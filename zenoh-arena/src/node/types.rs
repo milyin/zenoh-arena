@@ -3,9 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 use zenoh::key_expr::KeyExpr;
 
-use crate::network::{HostQueryable, KeyexprClient, KeyexprHost, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
-use crate::node::client_state::ClientState;
 use crate::error::{ArenaError, Result};
+use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
+use crate::network::keyexpr::{KeyexprNode, NodeType};
+use crate::node::client_state::ClientState;
 use crate::node::host_state::HostState;
 use crate::node::node::GameEngine;
 use crate::node::name_generator;
@@ -255,7 +256,7 @@ where
         let prefix = prefix.into();
 
         // Create host liveliness token for discovery
-        let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(node_id.clone()));
+        let host_keyexpr = KeyexprNode::new(prefix.clone(), NodeType::Host, Some(node_id.clone()));
         let token =
             NodeLivelinessToken::declare(session, host_keyexpr)
                 .await?;
@@ -263,8 +264,8 @@ where
         // Declare queryable for host discovery
         let queryable = HostQueryable::declare(session, prefix.clone(), node_id.clone()).await?;
 
-        // Create multinode liveliness watch for monitoring connected clients
-        let client_liveliness_watch = NodeLivelinessWatch::<KeyexprClient>::new();
+        // Create liveliness watch for monitoring connected clients
+        let client_liveliness_watch = NodeLivelinessWatch::new();
 
         // Create action subscriber to receive actions from clients
         let action_subscriber = NodeSubscriber::new(session, prefix.clone(), node_id).await?;
@@ -298,14 +299,14 @@ where
         let prefix = prefix.into();
 
         // Create and subscribe to liveliness events for the host
-        let mut liveliness_watch = NodeLivelinessWatch::<KeyexprHost>::new();
-        let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(host_id.clone()));
+        let mut liveliness_watch = NodeLivelinessWatch::new();
+        let host_keyexpr = KeyexprNode::new(prefix.clone(), NodeType::Host, Some(host_id.clone()));
         liveliness_watch
             .subscribe(session, host_keyexpr)
             .await?;
 
-        // Declare client liveliness token (role: Client) so host can track our presence
-        let client_keyexpr = KeyexprClient::new(prefix.clone(), Some(client_id.clone()));
+        // Declare client liveliness token (type: Client) so host can track our presence
+        let client_keyexpr = KeyexprNode::new(prefix.clone(), NodeType::Client, Some(client_id.clone()));
         let liveliness_token =
             NodeLivelinessToken::declare(session, client_keyexpr).await?;
 

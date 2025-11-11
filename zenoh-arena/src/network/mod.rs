@@ -11,8 +11,7 @@ pub use host_querier::HostQuerier;
 pub use host_queryable::HostQueryable;
 #[allow(unused_imports)]
 pub use keyexpr::{
-    KeyexprClient, KeyexprHost, KeyexprLink, KeyexprNode, KeyexprShake,
-    KeyexprNodeTrait, KeyexprNode2Trait,
+    KeyexprLink, KeyexprNode, LinkType, NodeType,
 };
 pub use node_liveliness::{NodeLivelinessToken, NodeLivelinessWatch};
 pub use node_publisher::NodePublisher;
