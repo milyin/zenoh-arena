@@ -93,7 +93,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
                 .await?
         } else {
             // Start in searching state with no initial state
-            NodeStateInternal::searching(None)
+            NodeStateInternal::searching()
         };
 
         let node = Self {
@@ -152,12 +152,13 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
                         &self.id,
                         &self.command_rx,
                         &*self.get_engine,
+                        self.game_state.clone(),
                     )
                     .await?
             }
             NodeStateInternal::Client(client_state) => {
                 client_state
-                    .step(&self.config, &self.id, &self.command_rx)
+                    .step(&self.config, &self.id, &self.command_rx, self.game_state.clone())
                     .await?
             }
             NodeStateInternal::Host(host_state) => {

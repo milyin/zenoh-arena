@@ -10,9 +10,8 @@ use rand::Rng;
 
 /// State while searching for available hosts
 pub(crate) struct SearchingHostState<E: GameEngine> {
-    /// Optional initial state to use when becoming host
-    /// This is preserved from a previous client session if the client lost its host
-    pub(crate) initial_state: Option<E::State>,
+    // Empty state - game_state is passed through step() method
+    pub(crate) _phantom: std::marker::PhantomData<E>,
 }
 
 impl<E: GameEngine> SearchingHostState<E> {
@@ -28,6 +27,7 @@ impl<E: GameEngine> SearchingHostState<E> {
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
         get_engine: &F,
+        game_state: Option<E::State>,
     ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)>
     where
         F: EngineFactory<E>,
@@ -129,7 +129,7 @@ impl<E: GameEngine> SearchingHostState<E> {
                 session,
                 config.keyexpr_prefix.clone(),
                 node_id,
-                self.initial_state,
+                game_state,
             )
             .await?;
             Ok((

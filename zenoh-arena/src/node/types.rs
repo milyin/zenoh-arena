@@ -211,10 +211,9 @@ where
     /// Transition to SearchingHost state from any state
     ///
     /// Drops the current state (including engine and liveliness token if in Host mode)
-    /// Optionally preserves game state to use when becoming host
-    pub fn searching(initial_state: Option<E::State>) -> Self {
+    pub fn searching() -> Self {
         NodeStateInternal::SearchingHost(crate::node::searching_host_state::SearchingHostState {
-            initial_state,
+            _phantom: std::marker::PhantomData,
         })
     }
 
@@ -324,7 +323,6 @@ where
             _liveliness_token: liveliness_token,
             action_publisher,
             state_subscriber,
-            game_state: None,
         }))
     }
 }
@@ -339,7 +337,7 @@ where
             NodeStateInternal::SearchingHost(_) => NodeState::SearchingHost,
             NodeStateInternal::Client(client_state) => NodeState::Client {
                 host_id: client_state.host_id.clone(),
-                game_state: client_state.game_state.clone(),
+                game_state: game_state.clone(),
             },
             NodeStateInternal::Host(host_state) => {
                 // Use the centralized is_accepting_clients() method

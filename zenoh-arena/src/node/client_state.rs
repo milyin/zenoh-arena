@@ -22,8 +22,6 @@ where
     pub(crate) action_publisher: NodePublisher<E::Action>,
     /// Subscriber for receiving game state from the host
     pub(crate) state_subscriber: NodeSubscriber<E::State>,
-    /// Current game state received from the host
-    pub(crate) game_state: Option<E::State>,
 }
 
 impl<E> ClientState<E>
@@ -45,6 +43,7 @@ where
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
+        _game_state: Option<E::State>,
     ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)> {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
@@ -67,7 +66,7 @@ where
                             tracing::info!("Node '{}' detected host '{}' disconnection, returning to search with preserved state", node_id, disconnected_id);
                             // Transition back to SearchingHost, preserving the game state
                             return Ok((
-                                NodeStateInternal::searching(self.game_state),
+                                NodeStateInternal::searching(),
                                 StepResult::RoleChanged(NodeRole::SearchingHost)
                             ));
                         }
@@ -75,7 +74,7 @@ where
                             tracing::warn!("Node '{}' liveliness error: {}", node_id, e);
                             // Treat error as disconnect
                             return Ok((
-                                NodeStateInternal::searching(self.game_state),
+                                NodeStateInternal::searching(),
                                 StepResult::RoleChanged(NodeRole::SearchingHost)
                             ));
                         }
@@ -84,18 +83,16 @@ where
                 // Game state received from host
                 state_result = self.state_subscriber.recv() => {
                     match state_result {
-                        Ok((_sender_id, game_state)) => {
+                        Ok((_sender_id, new_game_state)) => {
                             tracing::debug!(
                                 "Node '{}' received game state from host '{}'",
                                 node_id,
                                 self.host_id
                             );
-                            // Store the game state internally
-                            self.game_state = Some(game_state.clone());
                             // Return immediately with the received game state
                             return Ok((
                                 NodeStateInternal::Client(self),
-                                StepResult::GameState(game_state),
+                                StepResult::GameState(new_game_state),
                             ));
                         }
                         Err(e) => {
