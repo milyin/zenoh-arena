@@ -141,13 +141,11 @@ impl<S: std::fmt::Display> std::fmt::Display for NodeState<S> {
 }
 
 /// Current state of a Node (internal)
-#[derive(Default)]
 pub(crate) enum NodeStateInternal<E>
 where
     E: GameEngine,
 {
     /// Searching for available hosts
-    #[default]
     SearchingHost,
 
     /// Connected as client to a host
@@ -294,7 +292,7 @@ where
         Ok(NodeStateInternal::Client(ClientState {
             host_id,
             liveliness_watch,
-            liveliness_token,
+            _liveliness_token: liveliness_token,
             action_publisher,
         }))
     }

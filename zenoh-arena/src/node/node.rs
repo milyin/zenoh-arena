@@ -78,7 +78,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             NodeStateInternal::host(engine, &session, config.keyexpr_prefix.clone(), &id)
                 .await?
         } else {
-            NodeStateInternal::default()
+            NodeStateInternal::searching()
         };
 
         let node = Self {
