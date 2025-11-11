@@ -99,27 +99,23 @@ impl SearchingHostState {
         // Handle connection result - state transition after select!
         if let Some(host_id) = connected_host {
             // Transition to Client state
-            let mut next_state = NodeStateInternal::SearchingHost;
-            next_state
-                .client(
-                    session,
-                    config.keyexpr_prefix.clone(),
-                    host_id,
-                    node_id.clone(),
-                )
-                .await?;
+            let next_state = NodeStateInternal::client(
+                session,
+                config.keyexpr_prefix.clone(),
+                host_id,
+                node_id.clone(),
+            )
+            .await?;
             Ok(next_state)
         } else {
             // Transition to Host state
-            let mut next_state = NodeStateInternal::SearchingHost;
-            next_state
-                .host(
-                    get_engine(),
-                    session,
-                    config.keyexpr_prefix.clone(),
-                    node_id,
-                )
-                .await?;
+            let next_state = NodeStateInternal::host(
+                get_engine(),
+                session,
+                config.keyexpr_prefix.clone(),
+                node_id,
+            )
+            .await?;
             Ok(next_state)
         }
     }

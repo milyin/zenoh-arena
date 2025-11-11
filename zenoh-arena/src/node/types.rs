@@ -212,20 +212,19 @@ where
     /// Transition to SearchingHost state from any state
     ///
     /// Drops the current state (including engine and liveliness token if in Host mode)
-    pub fn searching(&mut self) {
-        *self = NodeStateInternal::SearchingHost;
+    pub fn searching() -> Self {
+        NodeStateInternal::SearchingHost
     }
 
-    /// Transition from SearchingHost to Host state
+    /// Create a new Host state
     ///
     /// Creates liveliness token and queryable for host discovery
     pub async fn host(
-        &mut self,
         engine: E,
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
-    ) -> Result<()>
+    ) -> Result<Self>
     where
         E: GameEngine,
     {
@@ -246,7 +245,7 @@ where
         // Create action subscriber to receive actions from clients
         let action_subscriber = NodeSubscriber::new(session, prefix.clone(), LinkType::Action, node_id).await?;
 
-        *self = NodeStateInternal::Host(HostState {
+        Ok(NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
             engine,
             _liveliness_token: Some(token),
@@ -254,21 +253,18 @@ where
             client_liveliness_watch,
             action_subscriber,
             game_state: None,
-        });
-
-        Ok(())
+        }))
     }
 
-    /// Transition from SearchingHost to Client state
+    /// Create a new Client state
     ///
     /// Subscribes to liveliness events for the host and declares a client liveliness token
     pub async fn client(
-        &mut self,
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
         client_id: NodeId,
-    ) -> Result<()>
+    ) -> Result<Self>
     where
         E::Action: zenoh_ext::Serialize,
     {
@@ -295,14 +291,12 @@ where
             &host_id,
         ).await?;
 
-        *self = NodeStateInternal::Client(ClientState {
+        Ok(NodeStateInternal::Client(ClientState {
             host_id,
             liveliness_watch,
             liveliness_token,
             action_publisher,
-        });
-
-        Ok(())
+        }))
     }
 }
 
