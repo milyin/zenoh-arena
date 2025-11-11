@@ -84,12 +84,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get command sender for the node
     let node_sender = node.sender();
 
-    // Spawn keyboard input task
+    // Spawn keyboard input task with separate term
     let keyboard_sender = node_sender.clone();
     let keyboard_task = tokio::task::spawn_blocking(move || {
-        let term = Term::stdout();
+        let input_term = Term::stdout();
         loop {
-            if let Ok(key) = term.read_key() {
+            if let Ok(key) = input_term.read_key() {
                 let action = match key {
                     Key::ArrowLeft => Some(Action::MoveLeft),
                     Key::ArrowRight => Some(Action::MoveRight),

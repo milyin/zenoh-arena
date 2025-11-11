@@ -1,7 +1,9 @@
 use zenoh_arena::{GameEngine, NodeId};
 use crate::tetris::Action;
 use crate::tetris_pair::{TetrisPair, PlayerSide};
+use crate::tetris::StepResult;
 use crate::state::TetrisPairState;
+use std::time;
 
 /// Tetris action wrapper
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +24,7 @@ impl TetrisEngine {
         std::thread::spawn(move || {
             let mut tetris_pair = TetrisPair::new(10, 20);
             // Setup game speed
+            let step_delay = time::Duration::from_millis(10);
             tetris_pair.set_fall_speed(1, 30);
             tetris_pair.set_drop_speed(1, 1);
             tetris_pair.set_line_remove_speed(3, 5);
@@ -29,34 +32,41 @@ impl TetrisEngine {
             let mut player_id: Option<NodeId> = None;
             let mut opponent_id: Option<NodeId> = None;
             
-            // Process actions from clients
-            while let Ok((client_id, action)) = input_rx.recv() {
-                // Assign player IDs on first action
-                if player_id.is_none() {
-                    player_id = Some(client_id.clone());
-                } else if opponent_id.is_none() && player_id.as_ref() != Some(&client_id) {
-                    opponent_id = Some(client_id.clone());
+            loop {
+                let start = time::Instant::now();
+                
+                // Process all pending actions using try_recv
+                while let Ok((client_id, action)) = input_rx.try_recv() {
+                    // Assign player IDs on first action
+                    if player_id.is_none() {
+                        player_id = Some(client_id.clone());
+                    } else if opponent_id.is_none() && player_id.as_ref() != Some(&client_id) {
+                        opponent_id = Some(client_id.clone());
+                    }
+
+                    // Determine which player sent the action
+                    let player_side = if player_id.as_ref() == Some(&client_id) {
+                        PlayerSide::Player
+                    } else if opponent_id.as_ref() == Some(&client_id) {
+                        PlayerSide::Opponent
+                    } else {
+                        continue; // Unknown player, skip
+                    };
+
+                    // Add action to the appropriate player
+                    tetris_pair.add_player_action(player_side, action.action);
                 }
-
-                // Determine which player sent the action
-                let player_side = if player_id.as_ref() == Some(&client_id) {
-                    PlayerSide::Player
-                } else if opponent_id.as_ref() == Some(&client_id) {
-                    PlayerSide::Opponent
-                } else {
-                    // Unknown player, send current state anyway
+                
+                // Perform game step and send state only if something changed
+                if tetris_pair.step() != (StepResult::None, StepResult::None) {
                     let _ = output_tx.send(tetris_pair.get_state());
-                    continue;
-                };
-
-                // Add action to the appropriate player
-                tetris_pair.add_player_action(player_side, action.action);
+                }
                 
-                // Perform game step
-                tetris_pair.step();
-                
-                // Send updated state
-                let _ = output_tx.send(tetris_pair.get_state());
+                // Maintain consistent timing
+                let elapsed = start.elapsed();
+                if elapsed < step_delay {
+                    std::thread::sleep(step_delay - elapsed);
+                }
             }
         });
 
