@@ -4,6 +4,7 @@ use crate::error::Result;
 use crate::network::HostQuerier;
 use super::node::{GameEngine, NodeCommand};
 use super::types::{NodeId, NodeStateInternal};
+use rand::Rng;
 
 /// State while searching for available hosts
 pub(crate) struct SearchingHostState;
@@ -26,6 +27,18 @@ impl SearchingHostState {
         E: GameEngine,
     {
         tracing::info!("Node '{}' searching for hosts...", node_id);
+
+        // Add randomized jitter to prevent thundering herd when multiple clients
+        // lose their host simultaneously
+        if config.search_jitter_ms > 0 {
+            let jitter_ms = rand::rng().random_range(0..config.search_jitter_ms);
+            tracing::debug!(
+                "Node '{}' waiting {}ms jitter before searching",
+                node_id,
+                jitter_ms
+            );
+            tokio::time::sleep(tokio::time::Duration::from_millis(jitter_ms)).await;
+        }
 
         let search_timeout = tokio::time::Duration::from_millis(config.search_timeout_ms);
         let sleep = tokio::time::sleep(search_timeout);

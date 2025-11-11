@@ -95,6 +95,15 @@ impl<'a, E: GameEngine, F: Fn() -> E> NodeBuilder<'a, E, F> {
         self
     }
 
+    /// Set the maximum random jitter before searching for hosts (in milliseconds)
+    /// Adds a randomized delay (0..jitter_ms) before querying for hosts.
+    /// This prevents the "thundering herd" problem when multiple clients lose
+    /// their host simultaneously and all try to become the new host at once.
+    pub fn search_jitter_ms(mut self, jitter_ms: u64) -> Self {
+        self.config.search_jitter_ms = jitter_ms;
+        self
+    }
+
     /// Set the key expression prefix
     pub fn prefix(mut self, prefix: KeyExpr<'static>) -> Self {
         self.config.keyexpr_prefix = prefix;

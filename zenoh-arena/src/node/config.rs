@@ -22,6 +22,13 @@ pub(crate) struct NodeConfig {
     /// the node transitions to Host state
     pub search_timeout_ms: u64,
 
+    /// Maximum random jitter before searching for hosts (in milliseconds)
+    /// Adds randomized delay (0..search_jitter_ms) before querying for hosts.
+    /// This prevents the "thundering herd" problem when multiple clients lose
+    /// their host simultaneously and all try to become the new host at once.
+    /// Default: 1000ms (0-1 second random delay)
+    pub search_jitter_ms: u64,
+
     /// Key expression prefix for all arena operations
     pub keyexpr_prefix: KeyExpr<'static>,
 }
@@ -33,6 +40,7 @@ impl Default for NodeConfig {
             force_host: false,
             step_timeout_ms: 100,
             search_timeout_ms: 3000, // 3 seconds to search for hosts
+            search_jitter_ms: 1000, // 0-1 second random delay before searching
             keyexpr_prefix: KeyExpr::try_from("zenoh/arena").unwrap().into_owned(),
         }
     }
