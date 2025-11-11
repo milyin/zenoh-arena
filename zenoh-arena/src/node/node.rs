@@ -81,10 +81,8 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
             tracing::info!("Node '{}' forced to host mode", id);
 
             // Use the constructor function to create host state
-            // Clone the Arc so we can move it into the closure
-            let engine_factory = Arc::clone(&get_engine);
             NodeStateInternal::host(
-                move |input_rx, output_tx| engine_factory(input_rx, output_tx),
+                Arc::clone(&get_engine),
                 &session,
                 config.keyexpr_prefix.clone(),
                 &id

@@ -7,7 +7,7 @@ use crate::error::{ArenaError, Result};
 use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
 use crate::network::keyexpr::{LinkType, NodeType};
 use crate::node::client_state::ClientState;
-use crate::node::game_engine::GameEngine;
+use crate::node::game_engine::{EngineFactory, GameEngine};
 use crate::node::host_state::HostState;
 use crate::node::name_generator;
 
@@ -203,14 +203,14 @@ where
     ///
     /// Creates liveliness token and queryable for host discovery
     pub async fn host<F>(
-        get_engine: F,
+        get_engine: Arc<F>,
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
     ) -> Result<Self>
     where
         E: GameEngine,
-        F: FnOnce(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E,
+        F: EngineFactory<E>,
     {
         let prefix = prefix.into();
 
