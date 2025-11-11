@@ -161,6 +161,23 @@ impl TryFrom<KeyExpr<'_>> for KeyexprNode {
 
 /// Keyexpr for link operations (handshake, pub/sub, query/reply)
 /// Format: `<prefix>/<link_type>/<node_src|*>/<node_dst|*>`
+///
+/// # Handshake Protocol Semantics
+///
+/// For handshake operations (LinkType::Handshake):
+/// - `node_src` represents the **requesting side** (client)
+/// - `node_dst` represents the **response side** (host)
+///
+/// Examples:
+/// - Discovery query: `<prefix>/handshake/<client_id>/*` (src=client, dst=wildcard)
+/// - Host queryable: `<prefix>/handshake/*/<host_id>` (src=wildcard, dst=host)
+/// - Connection query: `<prefix>/handshake/<client_id>/<host_id>` (src=client, dst=host)
+///
+/// # Other Link Types
+///
+/// For Action and State link types:
+/// - `node_src` represents the message sender
+/// - `node_dst` represents the message receiver
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyexprLink {
     prefix: KeyExpr<'static>,

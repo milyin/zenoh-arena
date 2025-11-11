@@ -5,37 +5,42 @@
 //! The connection process consists of two phases:
 //!
 //! ### Phase 1: Host Discovery
-//! - Client sends query to `<prefix>/handshake/*/client_id` keyexpr (glob on node_src)
-//! - All active hosts respond via their single queryable on `<prefix>/handshake/<host_id>/*`
+//! - Client sends query to `<prefix>/handshake/<client_id>/*` keyexpr (specific node_src, glob on node_dst)
+//! - All active hosts respond via their single queryable on `<prefix>/handshake/*/<host_id>`
 //! - This acts as a presence confirmation: "I am a host, here's my ID"
 //! - Client collects all available host IDs from responses
 //!
 //! ### Phase 2: Connection Attempt
-//! - For each discovered host, client sends query to `<prefix>/handshake/<host_id>/<client_id>` keyexpr
-//! - Host's same queryable on `<prefix>/handshake/<host_id>/*` responds to this specific keyexpr
+//! - For each discovered host, client sends query to `<prefix>/handshake/<client_id>/<host_id>` keyexpr
+//! - Host's same queryable on `<prefix>/handshake/*/<host_id>` responds to this specific keyexpr
 //! - This acts as a connection confirmation: "I accept your specific connection request"
 //! - If response is Ok, connection is established with that host
 //! - If no host responds positively, client returns None (will become host itself)
 //!
 //! ## Queryable Implementation (Future)
 //!
-//! Hosts will declare a SINGLE queryable on `<prefix>/handshake/<host_id>/*` that responds to:
+//! Hosts will declare a SINGLE queryable on `<prefix>/handshake/*/<host_id>` that responds to:
 //!
-//! 1. **Glob queries**: `<prefix>/handshake/<host_id>/*`
-//!    - Matches incoming glob discovery queries: `<prefix>/handshake/<host_id>/<client_id>`
-//!    - Keyexpr pattern: client_id is a wildcard
+//! 1. **Glob queries**: `<prefix>/handshake/<client_id>/*`
+//!    - Matches incoming glob discovery queries from any client
+//!    - Keyexpr pattern: node_src is specific client_id, node_dst is wildcard
 //!    - Response: Confirms host presence (for discovery phase)
 //!
-//! 2. **Specific queries**: `<prefix>/handshake/<host_id>/<specific_client_id>`
-//!    - Matches incoming specific connection queries: `<prefix>/handshake/<host_id>/<specific_client_id>`
-//!    - Keyexpr pattern: client_id matches exactly
+//! 2. **Specific queries**: `<prefix>/handshake/<client_id>/<host_id>`
+//!    - Matches incoming specific connection queries from a specific client to this host
+//!    - Keyexpr pattern: node_src is specific client_id, node_dst is specific host_id
 //!    - Response: Confirms connection acceptance (for connection phase)
 //!
 //! The queryable can distinguish between phases by checking the incoming query keyexpr:
-//! - If client_id is None/wildcard in the query → discovery phase (return basic host info)
-//! - If client_id is specific in the query → connection phase (check capacity and accept/reject)
+//! - If node_src (client_id) is specific → connection phase (check capacity and accept/reject)
+//! - Both are always specific in practice for this protocol
 //!
 //! This design allows a single queryable to handle both phases efficiently.
+//!
+//! ## Handshake Semantics
+//!
+//! - `node_src` represents the **requesting side** (client)
+//! - `node_dst` represents the **response side** (host)
 
 use crate::error::Result;
 use crate::network::keyexpr::{KeyexprLink, LinkType};
@@ -56,12 +61,12 @@ impl HostQuerier {
     /// Performs two-phase discovery and connection:
     ///
     /// **Phase 1: Host Discovery**
-    /// - Queries `<prefix>/handshake/*/<client_id>` (glob on node_src, specific node_dst)
+    /// - Queries `<prefix>/handshake/<client_id>/*` (specific node_src, glob on node_dst)
     /// - All available hosts respond to this glob pattern
     /// - Collects all discovered host IDs
     ///
     /// **Phase 2: Connection Establishment**
-    /// - For each discovered host, queries `<prefix>/handshake/<host_id>/<client_id>`
+    /// - For each discovered host, queries `<prefix>/handshake/<client_id>/<host_id>`
     /// - Host confirms it accepts this specific connection request
     /// - Returns the ID of the first host that accepts the connection
     ///
@@ -79,9 +84,9 @@ impl HostQuerier {
         let prefix = prefix.into();
 
         // Phase 1: Discover all available hosts
-        // Query: <prefix>/handshake/*/client_id (glob on node_src, specific node_dst)
+        // Query: <prefix>/handshake/<client_id>/* (specific node_src, glob on node_dst)
         // This queries all hosts in the arena, asking them to confirm presence
-        let discover_keyexpr = KeyexprLink::new(prefix.clone(), LinkType::Handshake, None, Some(client_id.clone()));
+        let discover_keyexpr = KeyexprLink::new(prefix.clone(), LinkType::Handshake, Some(client_id.clone()), None);
         let discover_keyexpr: KeyExpr = discover_keyexpr.into();
         let discovery_replies = session.get(discover_keyexpr).await?;
 
@@ -95,7 +100,7 @@ impl HostQuerier {
                     let keyexpr = sample.key_expr().clone();
                     match KeyexprLink::try_from(keyexpr.clone()) {
                         Ok(parsed) => {
-                            if let Some(host_id) = parsed.node_src() {
+                            if let Some(host_id) = parsed.node_dst() {
                                 tracing::debug!("Discovered host: {}", host_id);
                                 host_ids.push(host_id.clone());
                             }
@@ -122,14 +127,14 @@ impl HostQuerier {
         );
 
         // Phase 2: Try connecting to each discovered host
-        // Query: <prefix>/handshake/<host_id>/<client_id> (specific node_src and node_dst)
+        // Query: <prefix>/handshake/<client_id>/<host_id> (specific node_src and node_dst)
         // This requests the specific host to confirm it accepts this client's connection
         for host_id in host_ids {
             let connect_keyexpr = KeyexprLink::new(
                 prefix.clone(),
                 LinkType::Handshake,
-                Some(host_id.clone()),
                 Some(client_id.clone()),
+                Some(host_id.clone()),
             );
             let connect_keyexpr: KeyExpr = connect_keyexpr.into();
 

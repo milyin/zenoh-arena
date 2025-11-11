@@ -2,25 +2,30 @@
 //!
 //! ## Protocol Overview
 //!
-//! The host declares a SINGLE queryable on `<prefix>/handshake/<host_id>/*` pattern.
+//! The host declares a SINGLE queryable on `<prefix>/handshake/*/<host_id>` pattern.
 //! This queryable responds to both:
 //!
 //! 1. **Discovery Phase**: Glob queries from clients
-//!    - Client query: `<prefix>/handshake/*/<client_id>` (glob node_src)
-//!    - Matches queryable pattern: `<prefix>/handshake/<host_id>/*`
+//!    - Client query: `<prefix>/handshake/<client_id>/*` (specific node_src, glob node_dst)
+//!    - Matches queryable pattern: `<prefix>/handshake/*/<host_id>`
 //!    - Queryable callback replies with ok to confirm presence (discovery phase detected)
 //!
 //! 2. **Connection Phase**: Specific connection requests
-//!    - Client query: `<prefix>/handshake/<host_id>/<client_id>` (both specific)
-//!    - Matches same queryable pattern: `<prefix>/handshake/<host_id>/*`
-//!    - Queryable callback pushes NodeRequest to channel for host handler (connection phase detected)
+//!    - Client query: `<prefix>/handshake/<client_id>/<host_id>` (both specific)
+//!    - Matches same queryable pattern: `<prefix>/handshake/*/<host_id>`
+//!    - Queryable callback pushes HostRequest to channel for host handler (connection phase detected)
 //!    - Host calls accept() or reject() on the request
 //!
 //! ## Request Detection
 //!
 //! The callback distinguishes phases by checking the incoming query keyexpr:
-//! - If it matches `<host_id>/*` pattern with specific client_id → Connection request (pushed to channel)
-//! - If it matches `<host_id>/*` pattern with glob client_id → Discovery request (replied immediately)
+//! - If it matches `*/<host_id>` pattern with specific client_id → Connection request (pushed to channel)
+//! - If it matches `*/<host_id>` pattern with glob client_id → Discovery request (replied immediately)
+//!
+//! ## Handshake Semantics
+//!
+//! - `node_src` represents the **requesting side** (client)
+//! - `node_dst` represents the **response side** (host)
 
 use crate::error::Result;
 use crate::network::keyexpr::{KeyexprLink, LinkType};
@@ -43,7 +48,7 @@ impl HostRequest {
     ///
     /// # Panics
     ///
-    /// Panics if query keyexpr is not KeyexprLink with Handshake link_type, Some node_src (host_id), and matching node_dst (client_id).
+    /// Panics if query keyexpr is not KeyexprLink with Handshake link_type, Some node_dst (host_id), and matching node_src (client_id).
     pub fn new(query: Query, client_id: NodeId) -> Self {
         let parsed =
             KeyexprLink::try_from(query.key_expr().clone()).expect("Invalid KeyexprLink");
@@ -54,19 +59,19 @@ impl HostRequest {
             query.key_expr().as_str()
         );
         assert!(
-            parsed.node_src().is_some(),
-            "Expected specific node_src in query keyexpr: {}",
+            parsed.node_dst().is_some(),
+            "Expected specific node_dst in query keyexpr: {}",
             query.key_expr().as_str()
         );
         assert_eq!(
-            parsed.node_dst().as_ref().unwrap_or_else(|| panic!(
-                "Expected specific node_dst in query keyexpr: {}",
+            parsed.node_src().as_ref().unwrap_or_else(|| panic!(
+                "Expected specific node_src in query keyexpr: {}",
                 query.key_expr().as_str()
             )),
             &client_id,
             "Client ID mismatch: expected '{}', found '{}'",
             client_id,
-            parsed.node_dst().as_ref().unwrap()
+            parsed.node_src().as_ref().unwrap()
         );
 
         Self { query, client_id }
@@ -130,15 +135,15 @@ pub struct HostQueryable {
 impl HostQueryable {
     /// Declare a new queryable for a host node
     ///
-    /// Declares queryable on `<prefix>/handshake/<host_id>/*` pattern.
+    /// Declares queryable on `<prefix>/handshake/*/<host_id>` pattern.
     pub async fn declare(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: NodeId,
     ) -> Result<Self> {
         let prefix = prefix.into();
-        // Declare on pattern: <prefix>/handshake/<host_id>/*
-        let host_client_keyexpr = KeyexprLink::new(prefix.clone(), LinkType::Handshake, Some(node_id.clone()), None);
+        // Declare on pattern: <prefix>/handshake/*/<host_id>
+        let host_client_keyexpr = KeyexprLink::new(prefix.clone(), LinkType::Handshake, None, Some(node_id.clone()));
         let keyexpr: KeyExpr = host_client_keyexpr.into();
 
         // Declare queryable without callback
@@ -157,8 +162,8 @@ impl HostQueryable {
     /// Wait for and retrieve the next connection request
     ///
     /// Loops receiving queries from the queryable. For each query:
-    /// - If it's a discovery query (glob node_dst): replies with ok
-    /// - If it's a connection query (specific node_dst): returns NodeRequest
+    /// - If it's a discovery query (glob node_src): replies with ok
+    /// - If it's a connection query (specific node_src): returns HostRequest
     pub async fn expect_connection(&self) -> Result<HostRequest> {
         loop {
             // Receive next query from queryable
@@ -178,7 +183,7 @@ impl HostQueryable {
                     }
                     
                     match (parsed.node_src(), parsed.node_dst()) {
-                        (Some(host_id), Some(client_id)) => {
+                        (Some(client_id), Some(host_id)) => {
                             assert_eq!(
                                 host_id, &self.node_id,
                                 "Host ID mismatch: expected '{}', found '{}'",
@@ -187,27 +192,27 @@ impl HostQueryable {
                             // Connection request (specific node_src and node_dst): return it
                             return Ok(HostRequest::new(query, client_id.clone()));
                         }
-                        (Some(host_id), None) => {
-                            // ignore invalid case: specific node_src but glob node_dst
+                        (None, Some(host_id)) => {
+                            // ignore invalid case: glob node_src but specific node_dst
                             tracing::debug!(
-                                "Invalid query with specific node_src '{}' but glob node_dst: {}",
+                                "Invalid query with glob node_src but specific node_dst '{}': {}",
                                 host_id,
                                 query_keyexpr.as_str()
                             );
                         }
-                        (None, Some(client_id)) => {
-                            // request from specific client_id but glob node_src - correct discovery case
+                        (Some(client_id), None) => {
+                            // request from specific client_id but glob node_dst - correct discovery case
                             // Trace and reply with ok, confirming presence
                             tracing::debug!(
-                                "Discovery request from node_dst '{}' with glob node_src: {}",
+                                "Discovery request from node_src '{}' with glob node_dst: {}",
                                 client_id,
                                 query_keyexpr.as_str()
                             );
                             let reply_host_client = KeyexprLink::new(
                                 self.prefix.clone(),
                                 LinkType::Handshake,
-                                Some(self.node_id.clone()),
                                 Some(client_id.clone()),
+                                Some(self.node_id.clone()),
                             );
                             let reply_keyexpr: KeyExpr = reply_host_client.into();
                             if let Err(e) = query.reply(&reply_keyexpr, "").await {
