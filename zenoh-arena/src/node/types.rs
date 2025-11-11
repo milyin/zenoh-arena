@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use zenoh::key_expr::KeyExpr;
 
-use crate::network::{HostQueryable, KeyexprClient, KeyexprHost, NodeLivelinessToken, NodeLivelinessWatch};
+use crate::network::{HostQueryable, KeyexprClient, KeyexprHost, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher};
 use crate::node::client_state::ClientState;
 use crate::error::{ArenaError, Result};
 use crate::node::host_state::HostState;
@@ -280,7 +280,6 @@ where
     /// Transition from SearchingHost to Client state
     ///
     /// Subscribes to liveliness events for the host and declares a client liveliness token
-    #[allow(dead_code)]
     pub async fn client(
         &mut self,
         session: &zenoh::Session,
@@ -291,8 +290,6 @@ where
     where
         E::Action: zenoh_ext::Serialize,
     {
-        use crate::network::{NodeLivelinessWatch, NodePublisher};
-
         let prefix = prefix.into();
 
         // Create and subscribe to liveliness events for the host
