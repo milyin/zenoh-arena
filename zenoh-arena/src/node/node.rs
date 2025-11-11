@@ -172,7 +172,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
 
 /// Trait for game engine integration
 ///
-/// The engine runs only on the host node and processes actions from clients
+/// The engine runs only on the host node and processes actions from clients via channels
 pub trait GameEngine: Send + Sync {
     /// Action type from user/client
     type Action: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send;
@@ -180,11 +180,14 @@ pub trait GameEngine: Send + Sync {
     /// State type sent to clients
     type State: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone;
 
-    /// Process an action and return new state
-    fn process_action(&mut self, action: Self::Action, client_id: &NodeId) -> Result<Self::State>;
-
     /// Maximum number of clients allowed (None = unlimited)
     fn max_clients(&self) -> Option<usize>;
+
+    /// Get the input channel sender for sending actions to the engine
+    fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)>;
+
+    /// Get the output channel receiver for receiving states from the engine
+    fn output_receiver(&self) -> flume::Receiver<Self::State>;
 }
 
 #[cfg(test)]
@@ -195,22 +198,53 @@ mod tests {
 
     // Simple test engine for testing purposes
     #[derive(Debug)]
-    struct TestEngine;
+    struct TestEngine {
+        input_tx: flume::Sender<(NodeId, u32)>,
+        #[allow(dead_code)]
+        input_rx: flume::Receiver<(NodeId, u32)>,
+        #[allow(dead_code)]
+        output_tx: flume::Sender<String>,
+        output_rx: flume::Receiver<String>,
+    }
+
+    impl TestEngine {
+        fn new() -> Self {
+            let (input_tx, input_rx) = flume::unbounded();
+            let (output_tx, output_rx) = flume::unbounded();
+            
+            // Spawn a task to process actions
+            let input_rx_clone = input_rx.clone();
+            let output_tx_clone = output_tx.clone();
+            std::thread::spawn(move || {
+                while let Ok((_node_id, _action)) = input_rx_clone.recv() {
+                    // Process the action
+                    let _ = output_tx_clone.send("processed".to_string());
+                }
+            });
+
+            Self {
+                input_tx,
+                input_rx,
+                output_tx,
+                output_rx,
+            }
+        }
+    }
 
     impl GameEngine for TestEngine {
         type Action = u32;
         type State = String;
 
-        fn process_action(
-            &mut self,
-            _action: Self::Action,
-            _client_id: &NodeId,
-        ) -> Result<Self::State> {
-            Ok("processed".to_string())
-        }
-
         fn max_clients(&self) -> Option<usize> {
             Some(4)
+        }
+
+        fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)> {
+            self.input_tx.clone()
+        }
+
+        fn output_receiver(&self) -> flume::Receiver<Self::State> {
+            self.output_rx.clone()
         }
     }
 
@@ -253,7 +287,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine;
+        let get_engine = || TestEngine::new();
 
         let result = session.declare_arena_node(get_engine).await;
         assert!(result.is_ok());
@@ -265,7 +299,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_custom_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine;
+        let get_engine = || TestEngine::new();
 
         let result = session
             .declare_arena_node(get_engine)
@@ -281,7 +315,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_invalid_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine;
+        let get_engine = || TestEngine::new();
 
         let builder_result = session
             .declare_arena_node(get_engine)
@@ -299,7 +333,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_step_with_force_host() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine;
+        let get_engine = || TestEngine::new();
 
         let mut node = session
             .declare_arena_node(get_engine)
@@ -325,7 +359,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_force_host_starts_in_host_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine;
+        let get_engine = || TestEngine::new();
 
         let node = session
             .declare_arena_node(get_engine)
@@ -339,7 +373,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine;
+        let get_engine = || TestEngine::new();
 
         let node = session.declare_arena_node(get_engine).await.unwrap();
         // Node should be in SearchingHost state by default
@@ -349,7 +383,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine;
+        let get_engine = || TestEngine::new();
 
         let mut node = session
             .declare_arena_node(get_engine)
@@ -396,7 +430,7 @@ mod tests {
 
         // Use the extension trait to declare a node (name must be called first)
         let node = session
-            .declare_arena_node(|| TestEngine)
+            .declare_arena_node(|| TestEngine::new())
             .name("test_node".to_string())
             .unwrap()
             .force_host(true)

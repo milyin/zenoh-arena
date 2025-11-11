@@ -1,4 +1,4 @@
-use zenoh_arena::{GameEngine, NodeId, Result as ArenaResult};
+use zenoh_arena::{GameEngine, NodeId};
 
 /// Action type - simple Bonjour message that increments counter
 #[derive(Debug, Clone)]
@@ -24,13 +24,37 @@ impl std::fmt::Display for BonjourState {
 
 /// Game engine that maintains a counter and increments it on each Bonjour action
 pub struct BonjourEngine {
-    state: BonjourState,
+    input_tx: flume::Sender<(NodeId, BonjourAction)>,
+    #[allow(dead_code)]
+    input_rx: flume::Receiver<(NodeId, BonjourAction)>,
+    #[allow(dead_code)]
+    output_tx: flume::Sender<BonjourState>,
+    output_rx: flume::Receiver<BonjourState>,
 }
 
 impl BonjourEngine {
     pub fn new() -> Self {
+        let (input_tx, input_rx) = flume::unbounded();
+        let (output_tx, output_rx) = flume::unbounded();
+        
+        let mut state = BonjourState::new();
+        
+        // Spawn a task to process actions
+        let input_rx_clone = input_rx.clone();
+        let output_tx_clone = output_tx.clone();
+        std::thread::spawn(move || {
+            while let Ok((_node_id, _action)) = input_rx_clone.recv() {
+                // Increment counter on each Bonjour action
+                state.counter += 1;
+                let _ = output_tx_clone.send(state.clone());
+            }
+        });
+
         Self {
-            state: BonjourState::new(),
+            input_tx,
+            input_rx,
+            output_tx,
+            output_rx,
         }
     }
 }
@@ -39,18 +63,16 @@ impl GameEngine for BonjourEngine {
     type Action = BonjourAction;
     type State = BonjourState;
 
-    fn process_action(
-        &mut self,
-        _action: Self::Action,
-        _client_id: &NodeId,
-    ) -> ArenaResult<Self::State> {
-        // Increment counter on each Bonjour action
-        self.state.counter += 1;
-        Ok(self.state.clone())
-    }
-
     fn max_clients(&self) -> Option<usize> {
         Some(2)
+    }
+
+    fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)> {
+        self.input_tx.clone()
+    }
+
+    fn output_receiver(&self) -> flume::Receiver<Self::State> {
+        self.output_rx.clone()
     }
 }
 
@@ -89,17 +111,20 @@ mod tests {
 
     #[test]
     fn test_engine_increments_counter() {
-        let mut engine = BonjourEngine::new();
+        let engine = BonjourEngine::new();
         
-        // Initial state should be 0
-        assert_eq!(engine.state.counter, 0);
+        // Send actions through the input channel
+        let input_sender = engine.input_sender();
+        let output_receiver = engine.output_receiver();
         
-        // Process action should increment
-        let state1 = engine.process_action(BonjourAction, &NodeId::generate()).unwrap();
+        // Send first action
+        input_sender.send((NodeId::generate(), BonjourAction)).unwrap();
+        let state1 = output_receiver.recv().unwrap();
         assert_eq!(state1.counter, 1);
         
-        // Process another action
-        let state2 = engine.process_action(BonjourAction, &NodeId::generate()).unwrap();
+        // Send second action
+        input_sender.send((NodeId::generate(), BonjourAction)).unwrap();
+        let state2 = output_receiver.recv().unwrap();
         assert_eq!(state2.counter, 2);
     }
 

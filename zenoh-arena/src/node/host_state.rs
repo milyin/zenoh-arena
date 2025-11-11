@@ -78,6 +78,9 @@ where
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
 
+        // Get the output receiver once to avoid lifetime issues
+        let output_receiver = self.engine.output_receiver();
+
         // Process commands until timeout or new state
         while tokio::select! {
             // Timeout elapsed
@@ -112,8 +115,31 @@ where
                             node_id,
                             sender_id
                         );
-                        // Process action through the engine
-                        let new_game_state = self.engine.process_action(action, &sender_id)?;
+                        // Send action to the engine via input channel
+                        if let Err(e) = self.engine.input_sender().send((sender_id, action)) {
+                            tracing::error!(
+                                "Node '{}' failed to send action to engine: {}",
+                                node_id,
+                                e
+                            );
+                        }
+                        
+                        true
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Node '{}' failed to receive action: {}",
+                            node_id,
+                            e
+                        );
+                        true
+                    }
+                }
+            }
+            // State received from engine
+            state_result = output_receiver.recv_async() => {
+                match state_result {
+                    Ok(new_game_state) => {
                         self.game_state = Some(new_game_state.clone());
                         
                         // Publish game state to all clients
@@ -128,8 +154,8 @@ where
                         false
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            "Node '{}' failed to receive action: {}",
+                        tracing::error!(
+                            "Node '{}' engine output channel closed: {}",
                             node_id,
                             e
                         );
@@ -152,20 +178,16 @@ where
                         "Node '{}' processing action in host mode",
                         node_id
                     );
-                    // Process action directly in the engine
-                    let new_game_state = self.engine.process_action(action, node_id)?;
-                    self.game_state = Some(new_game_state.clone());
-                    
-                    // Publish game state to all clients
-                    if let Err(e) = self.state_publisher.put(&new_game_state).await {
+                    // Send action to the engine via input channel
+                    if let Err(e) = self.engine.input_sender().send((node_id.clone(), action)) {
                         tracing::error!(
-                            "Node '{}' failed to publish game state: {}",
+                            "Node '{}' failed to send action to engine: {}",
                             node_id,
                             e
                         );
                     }
                     
-                    false
+                    true
                 }
             }
         } {}

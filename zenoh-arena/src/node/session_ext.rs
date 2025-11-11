@@ -10,23 +10,32 @@ pub trait SessionExt {
     ///
     /// # Example
     /// ```no_run
-    /// use zenoh_arena::{SessionExt, GameEngine};
+    /// use zenoh_arena::{SessionExt, GameEngine, NodeId};
     ///
-    /// # struct MyEngine;
+    /// # struct MyEngine {
+    /// #     input_tx: flume::Sender<(NodeId, String)>,
+    /// #     input_rx: flume::Receiver<(NodeId, String)>,
+    /// #     output_tx: flume::Sender<String>,
+    /// #     output_rx: flume::Receiver<String>,
+    /// # }
+    /// # impl MyEngine {
+    /// #     fn new() -> Self {
+    /// #         let (input_tx, input_rx) = flume::unbounded();
+    /// #         let (output_tx, output_rx) = flume::unbounded();
+    /// #         Self { input_tx, input_rx, output_tx, output_rx }
+    /// #     }
+    /// # }
     /// # impl GameEngine for MyEngine {
     /// #     type Action = String;
     /// #     type State = String;
-    /// #     fn process_action(&mut self, _: Self::Action, _: &zenoh_arena::NodeId) -> zenoh_arena::Result<Self::State> {
-    /// #         Ok("state".to_string())
-    /// #     }
-    /// #     fn max_clients(&self) -> Option<usize> {
-    /// #         None // Unlimited clients
-    /// #     }
+    /// #     fn max_clients(&self) -> Option<usize> { None }
+    /// #     fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)> { self.input_tx.clone() }
+    /// #     fn output_receiver(&self) -> flume::Receiver<Self::State> { self.output_rx.clone() }
     /// # }
     /// # async fn example() {
     /// let session = zenoh::open(zenoh::Config::default()).await.unwrap();
     /// let node = session
-    ///     .declare_arena_node(|| MyEngine)
+    ///     .declare_arena_node(|| MyEngine::new())
     ///     .await
     ///     .unwrap();
     /// # }

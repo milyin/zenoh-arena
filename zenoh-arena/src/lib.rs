@@ -24,18 +24,46 @@
 //! use zenoh_arena::{SessionExt, GameEngine, NodeId, Result};
 //!
 //! // Define your game engine
-//! struct MyEngine;
+//! struct MyEngine {
+//!     input_tx: flume::Sender<(NodeId, String)>,
+//!     input_rx: flume::Receiver<(NodeId, String)>,
+//!     output_tx: flume::Sender<String>,
+//!     output_rx: flume::Receiver<String>,
+//! }
+//! 
+//! impl MyEngine {
+//!     fn new() -> Self {
+//!         let (input_tx, input_rx) = flume::unbounded();
+//!         let (output_tx, output_rx) = flume::unbounded();
+//!         
+//!         // Spawn a task to process actions
+//!         let input_rx_clone = input_rx.clone();
+//!         let output_tx_clone = output_tx.clone();
+//!         std::thread::spawn(move || {
+//!             while let Ok((_node_id, action)) = input_rx_clone.recv() {
+//!                 let state = format!("Processed: {}", action);
+//!                 let _ = output_tx_clone.send(state);
+//!             }
+//!         });
+//!         
+//!         Self { input_tx, input_rx, output_tx, output_rx }
+//!     }
+//! }
 //!
 //! impl GameEngine for MyEngine {
 //!     type Action = String;
 //!     type State = String;
 //!     
-//!     fn process_action(&mut self, action: Self::Action, _client_id: &NodeId) -> Result<Self::State> {
-//!         Ok(format!("Processed: {}", action))
-//!     }
-//! 
 //!     fn max_clients(&self) -> Option<usize> {
 //!         None // Unlimited clients
+//!     }
+//!     
+//!     fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)> {
+//!         self.input_tx.clone()
+//!     }
+//!     
+//!     fn output_receiver(&self) -> flume::Receiver<Self::State> {
+//!         self.output_rx.clone()
 //!     }
 //! }
 //!
@@ -46,7 +74,7 @@
 //!     
 //!     // Declare an arena node using the extension trait
 //!     let node = session
-//!         .declare_arena_node(|| MyEngine)
+//!         .declare_arena_node(|| MyEngine::new())
 //!         .name("my_node".to_string())
 //!         .unwrap()
 //!         .force_host(true)
