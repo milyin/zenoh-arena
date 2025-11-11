@@ -42,15 +42,30 @@ impl BonjourEngine {
     ) -> Self {
         let mut state = initial_state.unwrap_or_default();
         
-        // Spawn a task to process actions
+        // Spawn a task to process actions and send periodic updates
         std::thread::spawn(move || {
-            while let Ok((_node_id, action)) = input_rx.recv() {
-                // Update counter based on action type
-                match action {
-                    BonjourAction::Bonjour => state.counter += 1,
-                    BonjourAction::Bonsoir => state.counter -= 1,
+            let timeout = std::time::Duration::from_secs(1);
+            
+            loop {
+                // Try to receive an action with a 1-second timeout
+                match input_rx.recv_timeout(timeout) {
+                    Ok((_node_id, action)) => {
+                        // Update counter based on action type
+                        match action {
+                            BonjourAction::Bonjour => state.counter += 1,
+                            BonjourAction::Bonsoir => state.counter -= 1,
+                        }
+                        let _ = output_tx.send(state.clone());
+                    }
+                    Err(flume::RecvTimeoutError::Timeout) => {
+                        // Timer expired - send current state
+                        let _ = output_tx.send(state.clone());
+                    }
+                    Err(flume::RecvTimeoutError::Disconnected) => {
+                        // Channel closed - exit loop
+                        break;
+                    }
                 }
-                let _ = output_tx.send(state.clone());
             }
         });
 
