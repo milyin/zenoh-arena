@@ -54,6 +54,7 @@ pub fn generate_random_name() -> String {
         // Validate that the name only contains alphanumeric characters
         // and is a reasonable length
         if !name.is_empty() 
+            && name.len() >= 5 // Minimum length for readability
             && name.len() <= 12  // Keep names reasonably short
             && name.chars().all(|c| c.is_alphanumeric() || c == '_') 
         {
