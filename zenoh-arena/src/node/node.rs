@@ -82,7 +82,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
 
             // Use the constructor function to create host state
             NodeStateInternal::host(
-                Arc::clone(&get_engine),
+                &*get_engine,
                 &session,
                 config.keyexpr_prefix.clone(),
                 &id
@@ -148,7 +148,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
                         &self.config,
                         &self.id,
                         &self.command_rx,
-                        &self.get_engine,
+                        &*self.get_engine,
                     )
                     .await
             }

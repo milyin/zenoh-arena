@@ -24,7 +24,7 @@ impl SearchingHostState {
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-        get_engine: &Arc<F>,
+        get_engine: &F,
     ) -> Result<NodeStateInternal<E>>
     where
         E: GameEngine,
@@ -114,7 +114,7 @@ impl SearchingHostState {
         } else {
             // Transition to Host state
             let next_state = NodeStateInternal::host(
-                Arc::clone(get_engine),
+                &*get_engine,
                 session,
                 config.keyexpr_prefix.clone(),
                 node_id,

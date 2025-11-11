@@ -203,7 +203,7 @@ where
     ///
     /// Creates liveliness token and queryable for host discovery
     pub async fn host<F>(
-        get_engine: Arc<F>,
+        get_engine: &F,
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
