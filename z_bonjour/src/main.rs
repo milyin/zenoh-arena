@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Declare node with configured parameters
     let mut node_builder = session
-        .declare_arena_node(|input_rx, output_tx| BonjourEngine::new(input_rx, output_tx))
+        .declare_arena_node(BonjourEngine::new)
         .force_host(args.force_host)
         .step_timeout_ms(1000);
 
@@ -72,7 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Prefix: {}", prefix);
     }
     println!("Commands:");
-    println!("  b - Send Bonjour action");
+    println!("  b - Send Bonjour action (increment counter)");
+    println!("  s - Send Bonsoir action (decrement counter)");
     println!("  q - Quit");
     println!();
 
@@ -95,7 +96,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 b'b' | b'B' => {
                     println!("→ Sending Bonjour action...");
                     if keyboard_sender
-                        .send(NodeCommand::GameAction(BonjourAction))
+                        .send(NodeCommand::GameAction(BonjourAction::Bonjour))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                b's' | b'S' => {
+                    println!("→ Sending Bonsoir action...");
+                    if keyboard_sender
+                        .send(NodeCommand::GameAction(BonjourAction::Bonsoir))
                         .is_err()
                     {
                         break;

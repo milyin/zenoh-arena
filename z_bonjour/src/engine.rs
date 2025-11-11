@@ -1,18 +1,27 @@
 use zenoh_arena::{GameEngine, NodeId};
 
-/// Action type - simple Bonjour message that increments counter
+/// Action type - Bonjour increments counter, Bonsoir decrements it
 #[derive(Debug, Clone)]
-pub struct BonjourAction;
+pub enum BonjourAction {
+    Bonjour,
+    Bonsoir,
+}
 
-/// State type - counter value
+/// State type - counter value (signed to allow negative values)
 #[derive(Debug, Clone)]
 pub struct BonjourState {
-    pub counter: u64,
+    pub counter: i64,
 }
 
 impl BonjourState {
     pub fn new() -> Self {
         Self { counter: 0 }
+    }
+}
+
+impl Default for BonjourState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -22,7 +31,7 @@ impl std::fmt::Display for BonjourState {
     }
 }
 
-/// Game engine that maintains a counter and increments it on each Bonjour action
+/// Game engine that maintains a counter and modifies it based on actions
 pub struct BonjourEngine;
 
 impl BonjourEngine {
@@ -31,9 +40,12 @@ impl BonjourEngine {
         
         // Spawn a task to process actions
         std::thread::spawn(move || {
-            while let Ok((_node_id, _action)) = input_rx.recv() {
-                // Increment counter on each Bonjour action
-                state.counter += 1;
+            while let Ok((_node_id, action)) = input_rx.recv() {
+                // Update counter based on action type
+                match action {
+                    BonjourAction::Bonjour => state.counter += 1,
+                    BonjourAction::Bonsoir => state.counter -= 1,
+                }
                 let _ = output_tx.send(state.clone());
             }
         });
@@ -54,15 +66,24 @@ impl GameEngine for BonjourEngine {
 // Implement zenoh-ext serialization for BonjourAction
 impl zenoh_ext::Serialize for BonjourAction {
     fn serialize(&self, serializer: &mut zenoh_ext::ZSerializer) {
-        // Minimal serialization - just write a tag byte (0 = Bonjour)
-        0u8.serialize(serializer);
+        // Serialize with tag byte: 0 = Bonjour, 1 = Bonsoir
+        let tag: u8 = match self {
+            BonjourAction::Bonjour => 0,
+            BonjourAction::Bonsoir => 1,
+        };
+        tag.serialize(serializer);
     }
 }
 
 impl zenoh_ext::Deserialize for BonjourAction {
     fn deserialize(deserializer: &mut zenoh_ext::ZDeserializer) -> Result<Self, zenoh_ext::ZDeserializeError> {
-        let _tag: u8 = u8::deserialize(deserializer)?;
-        Ok(BonjourAction)
+        let tag: u8 = u8::deserialize(deserializer)?;
+        match tag {
+            0 => Ok(BonjourAction::Bonjour),
+            1 => Ok(BonjourAction::Bonsoir),
+            // Default to Bonjour for any invalid byte
+            _ => Ok(BonjourAction::Bonjour),
+        }
     }
 }
 
@@ -75,7 +96,7 @@ impl zenoh_ext::Serialize for BonjourState {
 
 impl zenoh_ext::Deserialize for BonjourState {
     fn deserialize(deserializer: &mut zenoh_ext::ZDeserializer) -> Result<Self, zenoh_ext::ZDeserializeError> {
-        let counter: u64 = u64::deserialize(deserializer)?;
+        let counter: i64 = i64::deserialize(deserializer)?;
         Ok(BonjourState { counter })
     }
 }
@@ -93,28 +114,94 @@ mod tests {
         // Create engine
         let _engine = BonjourEngine::new(input_rx, output_tx);
         
-        // Send first action
-        input_tx.send((NodeId::generate(), BonjourAction)).unwrap();
+        // Send first Bonjour action
+        input_tx.send((NodeId::generate(), BonjourAction::Bonjour)).unwrap();
         let state1 = output_rx.recv().unwrap();
         assert_eq!(state1.counter, 1);
         
-        // Send second action
-        input_tx.send((NodeId::generate(), BonjourAction)).unwrap();
+        // Send second Bonjour action
+        input_tx.send((NodeId::generate(), BonjourAction::Bonjour)).unwrap();
         let state2 = output_rx.recv().unwrap();
         assert_eq!(state2.counter, 2);
     }
 
     #[test]
-    fn test_action_serialization() {
-        let action = BonjourAction;
+    fn test_engine_decrements_counter() {
+        // Create channels
+        let (input_tx, input_rx) = flume::unbounded();
+        let (output_tx, output_rx) = flume::unbounded();
+        
+        // Create engine
+        let _engine = BonjourEngine::new(input_rx, output_tx);
+        
+        // Send Bonsoir action
+        input_tx.send((NodeId::generate(), BonjourAction::Bonsoir)).unwrap();
+        let state1 = output_rx.recv().unwrap();
+        assert_eq!(state1.counter, -1);
+        
+        // Send another Bonsoir action
+        input_tx.send((NodeId::generate(), BonjourAction::Bonsoir)).unwrap();
+        let state2 = output_rx.recv().unwrap();
+        assert_eq!(state2.counter, -2);
+    }
+
+    #[test]
+    fn test_engine_mixed_actions() {
+        // Create channels
+        let (input_tx, input_rx) = flume::unbounded();
+        let (output_tx, output_rx) = flume::unbounded();
+        
+        // Create engine
+        let _engine = BonjourEngine::new(input_rx, output_tx);
+        
+        // Bonjour +1
+        input_tx.send((NodeId::generate(), BonjourAction::Bonjour)).unwrap();
+        let state = output_rx.recv().unwrap();
+        assert_eq!(state.counter, 1);
+        
+        // Bonjour +1
+        input_tx.send((NodeId::generate(), BonjourAction::Bonjour)).unwrap();
+        let state = output_rx.recv().unwrap();
+        assert_eq!(state.counter, 2);
+        
+        // Bonsoir -1
+        input_tx.send((NodeId::generate(), BonjourAction::Bonsoir)).unwrap();
+        let state = output_rx.recv().unwrap();
+        assert_eq!(state.counter, 1);
+        
+        // Bonsoir -1
+        input_tx.send((NodeId::generate(), BonjourAction::Bonsoir)).unwrap();
+        let state = output_rx.recv().unwrap();
+        assert_eq!(state.counter, 0);
+        
+        // Bonsoir -1
+        input_tx.send((NodeId::generate(), BonjourAction::Bonsoir)).unwrap();
+        let state = output_rx.recv().unwrap();
+        assert_eq!(state.counter, -1);
+    }
+
+    #[test]
+    fn test_action_serialization_bonjour() {
+        let action = BonjourAction::Bonjour;
         
         // Serialize
         let zbytes = zenoh_ext::z_serialize(&action);
         
         // Deserialize
         let deserialized: BonjourAction = zenoh_ext::z_deserialize(&zbytes).unwrap();
-        // Actions are unit structs, so just check they deserialize
-        let _ = deserialized;
+        matches!(deserialized, BonjourAction::Bonjour);
+    }
+
+    #[test]
+    fn test_action_serialization_bonsoir() {
+        let action = BonjourAction::Bonsoir;
+        
+        // Serialize
+        let zbytes = zenoh_ext::z_serialize(&action);
+        
+        // Deserialize
+        let deserialized: BonjourAction = zenoh_ext::z_deserialize(&zbytes).unwrap();
+        matches!(deserialized, BonjourAction::Bonsoir);
     }
 
     #[test]
@@ -127,6 +214,18 @@ mod tests {
         // Deserialize
         let deserialized: BonjourState = zenoh_ext::z_deserialize(&zbytes).unwrap();
         assert_eq!(deserialized.counter, 42);
+    }
+
+    #[test]
+    fn test_state_serialization_negative() {
+        let state = BonjourState { counter: -42 };
+        
+        // Serialize
+        let zbytes = zenoh_ext::z_serialize(&state);
+        
+        // Deserialize
+        let deserialized: BonjourState = zenoh_ext::z_deserialize(&zbytes).unwrap();
+        assert_eq!(deserialized.counter, -42);
     }
 
     #[test]
