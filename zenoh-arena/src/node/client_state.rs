@@ -1,3 +1,4 @@
+use crate::{NodeRole, StepResult};
 /// Client state implementation
 use crate::node::config::NodeConfig;
 use crate::error::Result;
@@ -42,8 +43,8 @@ where
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-    ) -> Result<StepStateResult<E>>
-    {
+        preserved_game_state: Option<E::State>,
+    ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)> {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
@@ -53,10 +54,10 @@ where
             tokio::select! {
                 // Timeout elapsed
                 () = &mut sleep => {
-                    return Ok(StepStateResult {
-                        next_state: NodeStateInternal::Client(self),
-                        game_state: None,
-                    });
+                    return Ok((
+                        NodeStateInternal::Client(self),
+                        StepResult::Timeout,
+                    ));
                 }
                 // Host liveliness lost - disconnect and return to searching
                 disconnect_result = self.liveliness_watch.disconnected() => {
@@ -64,18 +65,18 @@ where
                         Ok(disconnected_id) => {
                             tracing::info!("Node '{}' detected host '{}' disconnection, returning to search with preserved state", node_id, disconnected_id);
                             // Transition back to SearchingHost, don't pass state here (Node maintains it)
-                            return Ok(StepStateResult {
-                                next_state: NodeStateInternal::searching(None),
-                                game_state: None,
-                            });
+                            return Ok((
+                                NodeStateInternal::searching(preserved_game_state),
+                                StepResult::RoleChanged(NodeRole::SearchingHost)
+                            ));
                         }
                         Err(e) => {
                             tracing::warn!("Node '{}' liveliness error: {}", node_id, e);
                             // Treat error as disconnect
-                            return Ok(StepStateResult {
-                                next_state: NodeStateInternal::searching(None),
-                                game_state: None,
-                            });
+                            return Ok((
+                                NodeStateInternal::searching(preserved_game_state),
+                                StepResult::RoleChanged(NodeRole::SearchingHost)
+                            ));
                         }
                     }
                 }
@@ -89,10 +90,10 @@ where
                                 self.host_id
                             );
                             // Return immediately with the received game state
-                            return Ok(StepStateResult {
-                                next_state: NodeStateInternal::Client(self),
-                                game_state: Some(game_state),
-                            });
+                            return Ok((
+                                NodeStateInternal::Client(self),
+                                StepResult::GameState(game_state),
+                            ));
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -109,17 +110,17 @@ where
                 result = command_rx.recv_async() => match result {
                     Err(_) => {
                         tracing::info!("Node '{}' command channel closed", node_id);
-                        return Ok(StepStateResult {
-                            next_state: NodeStateInternal::Stop,
-                            game_state: None,
-                        });
+                        return Ok((
+                            NodeStateInternal::Stop,
+                            StepResult::Stop,
+                        ));
                     }
                     Ok(NodeCommand::Stop) => {
                         tracing::info!("Node '{}' received Stop command, exiting", node_id);
-                        return Ok(StepStateResult {
-                            next_state: NodeStateInternal::Stop,
-                            game_state: None,
-                        });
+                        return Ok((
+                            NodeStateInternal::Stop,
+                            StepResult::Stop,
+                        ));
                     }
                     Ok(NodeCommand::GameAction(action)) => {
                         tracing::debug!(

@@ -72,10 +72,12 @@ impl std::fmt::Display for NodeId {
 /// Node role in the arena
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeRole {
-    /// Client role - connects to hosts
+    /// Client role - connected to host
     Client,
     /// Host role - accepts clients and runs game engine
     Host,
+    /// Searching for hosts mode
+    SearchingHost,
 }
 
 /// Node information
@@ -91,11 +93,13 @@ pub struct NodeInfo {
 
 /// Result of a step execution
 #[derive(Debug, Clone)]
-pub enum StepResult<S = ()> {
+pub enum StepResult<S> {
     /// A game state was produced
-    GameState(NodeState<S>),
+    GameState(S),
     /// The step timed out without producing a game state
     Timeout,
+    /// Node state changed
+    RoleChanged(NodeRole),
     /// The node has stopped
     Stop,
 }

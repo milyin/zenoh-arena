@@ -1,9 +1,18 @@
 /// Host state implementation
 use std::sync::Arc;
 
-use crate::{network::{host_queryable::HostRequest, NodePublisher, NodeSubscriber}, node::{config::NodeConfig, game_engine::GameEngine, node::NodeCommand, types::{NodeId, NodeStateInternal, StepStateResult}}};
+use crate::StepResult;
 use crate::error::Result;
 use crate::network::keyexpr::NodeType;
+use crate::{
+    network::{host_queryable::HostRequest, NodePublisher, NodeSubscriber},
+    node::{
+        config::NodeConfig,
+        game_engine::GameEngine,
+        node::NodeCommand,
+        types::{NodeId, NodeStateInternal, StepStateResult},
+    },
+};
 
 /// State while acting as a host
 pub(crate) struct HostState<E>
@@ -74,8 +83,7 @@ where
         node_id: &NodeId,
         session: &zenoh::Session,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-    ) -> Result<StepStateResult<E>>
-    {
+    ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)> {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
@@ -122,7 +130,7 @@ where
                                 e
                             );
                         }
-                        
+
                         true
                     }
                     Err(e) => {
@@ -147,12 +155,12 @@ where
                                 e
                             );
                         }
-                        
+
                         // Return immediately with the new game state
-                        return Ok(StepStateResult {
-                            next_state: NodeStateInternal::Host(self),
-                            game_state: Some(new_game_state),
-                        });
+                        return Ok((
+                            NodeStateInternal::Host(self),
+                            StepResult::GameState(new_game_state),
+                        ));
                     }
                     Err(e) => {
                         tracing::error!(
@@ -168,17 +176,17 @@ where
             result = command_rx.recv_async() => match result {
                 Err(_) => {
                     tracing::info!("Node '{}' command channel closed", node_id);
-                    return Ok(StepStateResult {
-                        next_state: NodeStateInternal::Stop,
-                        game_state: None,
-                    });
+                    return Ok((
+                        NodeStateInternal::Stop,
+                        StepResult::Stop,
+                    ));
                 }
                 Ok(NodeCommand::Stop) => {
                     tracing::info!("Node '{}' received Stop command, exiting", node_id);
-                    return Ok(StepStateResult {
-                        next_state: NodeStateInternal::Stop,
-                        game_state: None,
-                    });
+                    return Ok((
+                        NodeStateInternal::Stop,
+                        StepResult::Stop,
+                    ));
                 }
                 Ok(NodeCommand::GameAction(action)) => {
                     tracing::debug!(
@@ -193,17 +201,17 @@ where
                             e
                         );
                     }
-                    
+
                     true
                 }
             }
         } {}
 
         // Timeout occurred without receiving new game state
-        Ok(StepStateResult {
-            next_state: NodeStateInternal::Host(self),
-            game_state: None,
-        })
+        Ok((
+            NodeStateInternal::Host(self),
+            StepResult::Timeout,
+        ))
     }
 
     /// Handle a connection request from a client
@@ -304,7 +312,11 @@ where
             disconnected_id
         );
 
-        let removed = if let Some(pos) = host_state.connected_clients.iter().position(|id| id == &disconnected_id) {
+        let removed = if let Some(pos) = host_state
+            .connected_clients
+            .iter()
+            .position(|id| id == &disconnected_id)
+        {
             host_state.connected_clients.remove(pos);
             true
         } else {

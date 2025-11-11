@@ -5,7 +5,7 @@ use std::time::Duration;
 use z_tetris::engine::{TetrisAction, TetrisEngine};
 use z_tetris::{Action, AnsiTermStyle, GameFieldPair, TermRender, TetrisPairState};
 use zenoh::key_expr::KeyExpr;
-use zenoh_arena::{Node, NodeCommand, NodeState, SessionExt};
+use zenoh_arena::{Node, NodeCommand, NodeState, SessionExt, StepResult};
 
 /// z_tetris - Zenoh Arena Tetris Game
 #[derive(Parser, Debug)]
@@ -125,12 +125,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Main step loop - processes commands and renders state
     loop {
         match node.step().await? {
-            zenoh_arena::StepResult::Stop => {
+            StepResult::Stop => {
                 // Node stopped
                 println!("Node stopped");
                 break;
             }
-            zenoh_arena::StepResult::GameState(_) | zenoh_arena::StepResult::Timeout => {
+            StepResult::GameState(_) | StepResult::Timeout | StepResult::RoleChanged(_) => {
                 // Get the current state
                 let state = node.state();
                 

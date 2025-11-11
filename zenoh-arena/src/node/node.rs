@@ -142,7 +142,8 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
         }
 
         // Dispatch based on current state using state-specific run methods
-        let next_result = match std::mem::replace(&mut self.state, NodeStateInternal::searching(None)) {
+        let node_state = std::mem::replace(&mut self.state, NodeStateInternal::Stop);
+        let (next_node_state, step_result) = match node_state {
             NodeStateInternal::SearchingHost(searching_state) => {
                 searching_state
                     .step(
@@ -151,61 +152,33 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
                         &self.id,
                         &self.command_rx,
                         &*self.get_engine,
-                        self.game_state.clone(),
                     )
-                    .await
+                    .await?
             }
             NodeStateInternal::Client(client_state) => {
                 client_state
-                    .step(&self.config, &self.id, &self.command_rx)
-                    .await
+                    .step(&self.config, &self.id, &self.command_rx, self.game_state.clone())
+                    .await?
             }
             NodeStateInternal::Host(host_state) => {
                 host_state
                     .step(&self.config, &self.id, &self.session, &self.command_rx)
-                    .await
+                    .await?
             }
             NodeStateInternal::Stop => {
                 // If already stopped, remain stopped
-                Ok(crate::node::types::StepStateResult {
-                    next_state: NodeStateInternal::Stop,
-                    game_state: None,
-                })
+                (
+                    NodeStateInternal::Stop,
+                    StepResult::Stop,
+                )
             }
         };
-        
-        // Update state with the next state returned and generate StepResult
-        match next_result {
-            Ok(step_state_result) => {
-                let crate::node::types::StepStateResult { next_state, game_state } = step_state_result;
-                
-                // Track if we got a new game state in this step
-                let has_new_state = game_state.is_some();
-                
-                // Update game state if a new one was produced
-                if let Some(new_state) = game_state {
-                    self.game_state = Some(new_state);
-                }
-                
-                // Check if Stop state
-                if matches!(next_state, NodeStateInternal::Stop) {
-                    self.state = next_state;
-                    return Ok(StepResult::Stop);
-                }
-                
-                // Generate public NodeState
-                let node_state = next_state.to_node_state(&self.game_state);
-                self.state = next_state;
-                
-                // Return appropriate StepResult based on whether we received new state in this step
-                if has_new_state {
-                    Ok(StepResult::GameState(node_state))
-                } else {
-                    Ok(StepResult::Timeout)
-                }
-            }
-            Err(e) => Err(e),
+        self.state = next_node_state;
+        // Update stored game state if a new one was produced
+        if let StepResult::GameState(new_state) = &step_result {
+            self.game_state = Some(new_state.clone());
         }
+        Ok(step_result)
     }
 
     /// Get the current node state without advancing the state machine

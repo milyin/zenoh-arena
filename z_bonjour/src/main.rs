@@ -1,9 +1,9 @@
 use clap::Parser;
-use z_bonjour::engine::{BonjourAction, BonjourEngine};
 use std::io::{self, Read};
 use std::path::PathBuf;
+use z_bonjour::engine::{BonjourAction, BonjourEngine};
 use zenoh::key_expr::KeyExpr;
-use zenoh_arena::{NodeCommand, SessionExt, StepResult};
+use zenoh_arena::{NodeCommand, NodeRole, SessionExt, StepResult};
 
 /// z_bonjour - Zenoh Arena Demo
 #[derive(Parser, Debug)]
@@ -129,11 +129,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Node stopped");
                 break;
             }
-            StepResult::GameState(_) | StepResult::Timeout => {
-                let state = node.state();
-                println!("{}", state);
+            StepResult::RoleChanged(role) => {
+                println!("→ Node role changed to: {:?}", role);
+            }
+            StepResult::GameState(state) => {
+                println!("Game state: {}", state);
+            }
+            StepResult::Timeout => {
+                println!("Timeout passed without state update");
             }
         }
+        println!("Node state: {}", node.state());
     }
 
     // Wait for keyboard task to finish
