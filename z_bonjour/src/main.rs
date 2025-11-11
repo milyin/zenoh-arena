@@ -50,8 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Declare node with configured parameters
     let mut node_builder = session
         .declare_arena_node(BonjourEngine::new)
-        .force_host(args.force_host)
-        .step_timeout_ms(1000);
+        .force_host(args.force_host);
 
     // Apply name if provided
     if let Some(name) = args.name.clone() {

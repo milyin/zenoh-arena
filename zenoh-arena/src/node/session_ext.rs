@@ -86,8 +86,8 @@ impl<'a, E: GameEngine, F: EngineFactory<E>> NodeBuilder<'a, E, F> {
     }
 
     /// Set the step timeout in milliseconds
-    pub fn step_timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.config.step_timeout_ms = timeout_ms;
+    pub fn step_timeout_break_ms(mut self, timeout_ms: u64) -> Self {
+        self.config.step_timeout_break_ms = timeout_ms;
         self
     }
 

@@ -377,7 +377,7 @@ mod tests {
         let mut node = session
             .declare_arena_node(get_engine)
             .force_host(true)
-            .step_timeout_ms(50)
+            .step_timeout_break_ms(50)
             .await
             .unwrap();
 
@@ -415,7 +415,7 @@ mod tests {
             .name("test_node".to_string())
             .unwrap()
             .force_host(true)
-            .step_timeout_ms(50)
+            .step_timeout_break_ms(50)
             .await
             .unwrap();
 

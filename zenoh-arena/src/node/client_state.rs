@@ -45,7 +45,7 @@ where
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
         _game_state: Option<E::State>,
     ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)> {
-        let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
+        let timeout = tokio::time::Duration::from_millis(config.step_timeout_break_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
 

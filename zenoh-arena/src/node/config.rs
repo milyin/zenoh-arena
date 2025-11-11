@@ -15,7 +15,7 @@ pub(crate) struct NodeConfig {
 
     /// Timeout for step() method in milliseconds
     /// step() returns when either new game state is available or this timeout elapses
-    pub step_timeout_ms: u64,
+    pub step_timeout_break_ms: u64,
 
     /// Timeout for host search in milliseconds
     /// When in SearchingHost state, if no hosts are found within this timeout,
@@ -38,7 +38,7 @@ impl Default for NodeConfig {
         Self {
             node_id: NodeId::generate(),
             force_host: false,
-            step_timeout_ms: 100,
+            step_timeout_break_ms: 5000,
             search_timeout_ms: 3000, // 3 seconds to search for hosts
             search_jitter_ms: 1000, // 0-1 second random delay before searching
             keyexpr_prefix: KeyExpr::try_from("zenoh/arena").unwrap().into_owned(),

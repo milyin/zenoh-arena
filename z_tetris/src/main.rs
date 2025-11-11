@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut node_builder = session
         .declare_arena_node(TetrisEngine::new)
         .force_host(args.force_host)
-        .step_timeout_ms(1000);
+        .step_timeout_break_ms(1000);
 
     // Apply name if provided
     if let Some(name) = args.name.clone() {
