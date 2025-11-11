@@ -89,6 +89,17 @@ pub struct NodeInfo {
     pub connected_since: Instant,
 }
 
+/// Result of a step execution
+#[derive(Debug, Clone)]
+pub enum StepResult<S = ()> {
+    /// A game state was produced
+    GameState(NodeState<S>),
+    /// The step timed out without producing a game state
+    Timeout,
+    /// The node has stopped
+    Stop,
+}
+
 /// Public node state returned by step() method
 #[derive(Debug, Clone)]
 pub enum NodeState<S = ()> {
@@ -146,6 +157,14 @@ impl<S: std::fmt::Display> std::fmt::Display for NodeState<S> {
             NodeState::Stop => write!(f, "Node stopped"),
         }
     }
+}
+
+/// Internal result returned by state step methods
+pub(crate) struct StepStateResult<E: GameEngine> {
+    /// The next state
+    pub(crate) next_state: NodeStateInternal<E>,
+    /// Optional game state if one was produced during this step
+    pub(crate) game_state: Option<E::State>,
 }
 
 /// Current state of a Node (internal)
@@ -259,7 +278,6 @@ where
             client_liveliness_watch,
             action_subscriber,
             state_publisher,
-            game_state: None,
         }))
     }
 
@@ -310,28 +328,28 @@ where
             _liveliness_token: liveliness_token,
             action_publisher,
             state_subscriber,
-            game_state: None,
         }))
     }
 }
 
-impl<E> From<&NodeStateInternal<E>> for NodeState<E::State>
+impl<E> NodeStateInternal<E>
 where
     E: GameEngine,
 {
-    fn from(internal: &NodeStateInternal<E>) -> Self {
-        match internal {
+    /// Convert internal state to public NodeState with the provided game_state
+    pub(crate) fn to_node_state(&self, game_state: &Option<E::State>) -> NodeState<E::State> {
+        match self {
             NodeStateInternal::SearchingHost(_) => NodeState::SearchingHost,
             NodeStateInternal::Client(client_state) => NodeState::Client {
                 host_id: client_state.host_id.clone(),
-                game_state: client_state.game_state.clone(),
+                game_state: game_state.clone(),
             },
             NodeStateInternal::Host(host_state) => {
                 // Use the centralized is_accepting_clients() method
                 NodeState::Host {
                     is_accepting: host_state.is_accepting_clients(),
                     connected_clients: host_state.connected_clients.clone(),
-                    game_state: host_state.game_state.clone(),
+                    game_state: game_state.clone(),
                 }
             }
             NodeStateInternal::Stop => NodeState::Stop,

@@ -1,4 +1,4 @@
-use zenoh_arena::{GameEngine, NodeId, Result as ArenaResult};
+use zenoh_arena::{GameEngine, NodeId};
 use crate::tetris::Action;
 use crate::tetris_pair::{TetrisPair, PlayerSide};
 use crate::state::TetrisPairState;
@@ -10,69 +10,63 @@ pub struct TetrisAction {
 }
 
 /// Game engine that manages a Tetris game for two players
-pub struct TetrisEngine {
-    tetris_pair: TetrisPair,
-    player_id: Option<NodeId>,
-    opponent_id: Option<NodeId>,
-}
+pub struct TetrisEngine;
 
 impl TetrisEngine {
-    pub fn new() -> Self {
-        let mut tetris_pair = TetrisPair::new(10, 20);
-        // Setup game speed
-        tetris_pair.set_fall_speed(1, 30);
-        tetris_pair.set_drop_speed(1, 1);
-        tetris_pair.set_line_remove_speed(3, 5);
-        
-        Self {
-            tetris_pair,
-            player_id: None,
-            opponent_id: None,
-        }
-    }
-}
+    pub fn new(
+        input_rx: flume::Receiver<(NodeId, TetrisAction)>,
+        output_tx: flume::Sender<TetrisPairState>,
+        _initial_state: Option<TetrisPairState>,
+    ) -> Self {
+        // Spawn a background task to process actions
+        std::thread::spawn(move || {
+            let mut tetris_pair = TetrisPair::new(10, 20);
+            // Setup game speed
+            tetris_pair.set_fall_speed(1, 30);
+            tetris_pair.set_drop_speed(1, 1);
+            tetris_pair.set_line_remove_speed(3, 5);
+            
+            let mut player_id: Option<NodeId> = None;
+            let mut opponent_id: Option<NodeId> = None;
+            
+            // Process actions from clients
+            while let Ok((client_id, action)) = input_rx.recv() {
+                // Assign player IDs on first action
+                if player_id.is_none() {
+                    player_id = Some(client_id.clone());
+                } else if opponent_id.is_none() && player_id.as_ref() != Some(&client_id) {
+                    opponent_id = Some(client_id.clone());
+                }
 
-impl Default for TetrisEngine {
-    fn default() -> Self {
-        Self::new()
+                // Determine which player sent the action
+                let player_side = if player_id.as_ref() == Some(&client_id) {
+                    PlayerSide::Player
+                } else if opponent_id.as_ref() == Some(&client_id) {
+                    PlayerSide::Opponent
+                } else {
+                    // Unknown player, send current state anyway
+                    let _ = output_tx.send(tetris_pair.get_state());
+                    continue;
+                };
+
+                // Add action to the appropriate player
+                tetris_pair.add_player_action(player_side, action.action);
+                
+                // Perform game step
+                tetris_pair.step();
+                
+                // Send updated state
+                let _ = output_tx.send(tetris_pair.get_state());
+            }
+        });
+
+        Self
     }
 }
 
 impl GameEngine for TetrisEngine {
     type Action = TetrisAction;
     type State = TetrisPairState;
-
-    fn process_action(
-        &mut self,
-        action: Self::Action,
-        client_id: &NodeId,
-    ) -> ArenaResult<Self::State> {
-        // Assign player IDs on first action
-        if self.player_id.is_none() {
-            self.player_id = Some(client_id.clone());
-        } else if self.opponent_id.is_none() && self.player_id.as_ref() != Some(client_id) {
-            self.opponent_id = Some(client_id.clone());
-        }
-
-        // Determine which player sent the action
-        let player_side = if self.player_id.as_ref() == Some(client_id) {
-            PlayerSide::Player
-        } else if self.opponent_id.as_ref() == Some(client_id) {
-            PlayerSide::Opponent
-        } else {
-            // Unknown player, ignore
-            return Ok(self.tetris_pair.get_state());
-        };
-
-        // Add action to the appropriate player
-        self.tetris_pair.add_player_action(player_side, action.action);
-        
-        // Perform game step
-        self.tetris_pair.step();
-        
-        // Return current state
-        Ok(self.tetris_pair.get_state())
-    }
 
     fn max_clients(&self) -> Option<usize> {
         Some(2)
@@ -137,9 +131,10 @@ mod tests {
 
     #[test]
     fn test_engine_creation() {
-        let engine = TetrisEngine::new();
-        assert_eq!(engine.tetris_pair.cols(), 10);
-        assert_eq!(engine.tetris_pair.rows(), 20);
+        // Test creating a TetrisPair directly since TetrisEngine now uses channels
+        let tetris_pair = TetrisPair::new(10, 20);
+        assert_eq!(tetris_pair.cols(), 10);
+        assert_eq!(tetris_pair.rows(), 20);
     }
 
     #[test]
@@ -157,8 +152,9 @@ mod tests {
 
     #[test]
     fn test_state_serialization() {
-        let engine = TetrisEngine::new();
-        let state = engine.tetris_pair.get_state();
+        // Create a TetrisPair directly for testing
+        let tetris_pair = TetrisPair::new(10, 20);
+        let state = tetris_pair.get_state();
         
         // Serialize
         let zbytes = zenoh_ext::z_serialize(&state);

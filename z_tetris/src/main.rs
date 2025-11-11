@@ -125,43 +125,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Main step loop - processes commands and renders state
     loop {
         match node.step().await? {
-            NodeState::Stop => {
+            zenoh_arena::StepResult::Stop => {
                 // Node stopped
                 println!("Node stopped");
                 break;
             }
-            NodeState::Host {
-                game_state: None,
-                ..
-            } | NodeState::Client { game_state: None, .. } => {
-                // No game state to render yet
-            }
-            NodeState::Host {
-                game_state: Some(state),
-                ..
-            } => {
-                // Render the game state
-                if last_render.elapsed() >= render_interval {
-                    render_game(&render_term, &state)?;
-                    last_render = std::time::Instant::now();
+            zenoh_arena::StepResult::GameState(_) | zenoh_arena::StepResult::Timeout => {
+                // Get the current state
+                let state = node.state();
+                
+                match state {
+                    NodeState::Host {
+                        game_state: Some(game_state),
+                        ..
+                    } | NodeState::Client {
+                        game_state: Some(game_state),
+                        ..
+                    } => {
+                        // Render the game state
+                        if last_render.elapsed() >= render_interval {
+                            render_game(&render_term, &game_state)?;
+                            last_render = std::time::Instant::now();
+                        }
+                    }
+                    NodeState::SearchingHost => {
+                        // Clear rendering terminal while searching
+                        render_term.clear_screen()?;
+                        render_term.move_cursor_to(0, 0)?;
+                        render_term.write_line("Searching for host...")?;
+                        render_term.flush()?;
+                    }
+                    _ => {
+                        // No game state to render yet or in another state
+                    }
                 }
-            }
-            NodeState::Client {
-                game_state: Some(state),
-                ..
-            } => {
-                // Render the game state
-                if last_render.elapsed() >= render_interval {
-                    render_game(&render_term, &state)?;
-                    last_render = std::time::Instant::now();
-                }
-            }
-            NodeState::SearchingHost => {
-                // Clear rendering terminal while searching
-                render_term.clear_screen()?;
-                render_term.move_cursor_to(0, 0)?;
-                render_term.write_line("Searching for host...")?;
-                render_term.flush()?;
             }
         }
     }

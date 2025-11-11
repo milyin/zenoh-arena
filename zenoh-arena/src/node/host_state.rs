@@ -1,7 +1,7 @@
 /// Host state implementation
 use std::sync::Arc;
 
-use crate::{network::{host_queryable::HostRequest, NodePublisher, NodeSubscriber}, node::{config::NodeConfig, game_engine::GameEngine, node::NodeCommand, types::{NodeId, NodeStateInternal}}};
+use crate::{network::{host_queryable::HostRequest, NodePublisher, NodeSubscriber}, node::{config::NodeConfig, game_engine::GameEngine, node::NodeCommand, types::{NodeId, NodeStateInternal, StepStateResult}}};
 use crate::error::Result;
 use crate::network::keyexpr::NodeType;
 
@@ -28,8 +28,6 @@ where
     pub(crate) action_subscriber: NodeSubscriber<E::Action>,
     /// Publisher to send game state to all clients
     pub(crate) state_publisher: NodePublisher<E::State>,
-    /// Current game state from the engine
-    pub(crate) game_state: Option<E::State>,
 }
 
 impl<E> HostState<E>
@@ -76,7 +74,7 @@ where
         node_id: &NodeId,
         session: &zenoh::Session,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-    ) -> Result<NodeStateInternal<E>>
+    ) -> Result<StepStateResult<E>>
     {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
@@ -141,8 +139,6 @@ where
             state_result = self.output_rx.recv_async() => {
                 match state_result {
                     Ok(new_game_state) => {
-                        self.game_state = Some(new_game_state.clone());
-                        
                         // Publish game state to all clients
                         if let Err(e) = self.state_publisher.put(&new_game_state).await {
                             tracing::error!(
@@ -152,7 +148,11 @@ where
                             );
                         }
                         
-                        false
+                        // Return immediately with the new game state
+                        return Ok(StepStateResult {
+                            next_state: NodeStateInternal::Host(self),
+                            game_state: Some(new_game_state),
+                        });
                     }
                     Err(e) => {
                         tracing::error!(
@@ -168,11 +168,17 @@ where
             result = command_rx.recv_async() => match result {
                 Err(_) => {
                     tracing::info!("Node '{}' command channel closed", node_id);
-                    return Ok(NodeStateInternal::Stop);
+                    return Ok(StepStateResult {
+                        next_state: NodeStateInternal::Stop,
+                        game_state: None,
+                    });
                 }
                 Ok(NodeCommand::Stop) => {
                     tracing::info!("Node '{}' received Stop command, exiting", node_id);
-                    return Ok(NodeStateInternal::Stop);
+                    return Ok(StepStateResult {
+                        next_state: NodeStateInternal::Stop,
+                        game_state: None,
+                    });
                 }
                 Ok(NodeCommand::GameAction(action)) => {
                     tracing::debug!(
@@ -193,7 +199,11 @@ where
             }
         } {}
 
-        Ok(NodeStateInternal::Host(self))
+        // Timeout occurred without receiving new game state
+        Ok(StepStateResult {
+            next_state: NodeStateInternal::Host(self),
+            game_state: None,
+        })
     }
 
     /// Handle a connection request from a client

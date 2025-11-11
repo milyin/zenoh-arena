@@ -3,7 +3,7 @@ use z_bonjour::engine::{BonjourAction, BonjourEngine};
 use std::io::{self, Read};
 use std::path::PathBuf;
 use zenoh::key_expr::KeyExpr;
-use zenoh_arena::{NodeCommand, NodeState, SessionExt};
+use zenoh_arena::{NodeCommand, SessionExt, StepResult};
 
 /// z_bonjour - Zenoh Arena Demo
 #[derive(Parser, Debug)]
@@ -124,13 +124,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Main step loop - processes commands and prints state
     loop {
         match node.step().await? {
-            NodeState::Stop => {
+            StepResult::Stop => {
                 // Node stopped
                 println!("Node stopped");
                 break;
             }
-            status => {
-                println!("{}", status);
+            StepResult::GameState(_) | StepResult::Timeout => {
+                let state = node.state();
+                println!("{}", state);
             }
         }
     }

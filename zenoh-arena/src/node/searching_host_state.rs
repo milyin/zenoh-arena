@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::network::HostQuerier;
 use super::game_engine::{EngineFactory, GameEngine};
 use super::node::NodeCommand;
-use super::types::{NodeId, NodeStateInternal};
+use super::types::{NodeId, NodeStateInternal, StepStateResult};
 use rand::Rng;
 
 /// State while searching for available hosts
@@ -27,7 +27,8 @@ impl<E: GameEngine> SearchingHostState<E> {
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
         get_engine: &F,
-    ) -> Result<NodeStateInternal<E>>
+        preserved_game_state: Option<E::State>,
+    ) -> Result<StepStateResult<E>>
     where
         F: EngineFactory<E>,
     {
@@ -84,11 +85,17 @@ impl<E: GameEngine> SearchingHostState<E> {
                 result = command_rx.recv_async() => match result {
                     Err(_) => {
                         tracing::info!("Node '{}' command channel closed during search", node_id);
-                        return Ok(NodeStateInternal::Stop);
+                        return Ok(StepStateResult {
+                            next_state: NodeStateInternal::Stop,
+                            game_state: None,
+                        });
                     }
                     Ok(NodeCommand::Stop) => {
                         tracing::info!("Node '{}' received Stop command during search, exiting", node_id);
-                        return Ok(NodeStateInternal::Stop);
+                        return Ok(StepStateResult {
+                            next_state: NodeStateInternal::Stop,
+                            game_state: None,
+                        });
                     }
                     Ok(NodeCommand::GameAction(_)) => {
                         tracing::warn!(
@@ -111,18 +118,25 @@ impl<E: GameEngine> SearchingHostState<E> {
                 node_id.clone(),
             )
             .await?;
-            Ok(next_state)
+            Ok(StepStateResult {
+                next_state,
+                game_state: None,
+            })
         } else {
-            // Transition to Host state with the preserved initial state
+            // Transition to Host state with the preserved initial state or game state from Node
+            let initial_state_for_host = self.initial_state.or(preserved_game_state);
             let next_state = NodeStateInternal::host(
                 get_engine,
                 session,
                 config.keyexpr_prefix.clone(),
                 node_id,
-                self.initial_state,
+                initial_state_for_host,
             )
             .await?;
-            Ok(next_state)
+            Ok(StepStateResult {
+                next_state,
+                game_state: None,
+            })
         }
     }
 }
