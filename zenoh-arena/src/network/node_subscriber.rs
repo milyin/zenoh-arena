@@ -1,15 +1,16 @@
 //! Subscriber for node data with deserialization
 
 use crate::error::Result;
-use crate::network::keyexpr::KeyexprLink;
+use crate::network::keyexpr::{KeyexprLink, KeyexprNode2Trait};
 use crate::node::types::NodeId;
 use zenoh::key_expr::KeyExpr;
 
 /// Subscribes to a Zenoh key expression and deserializes received data
 ///
 /// This subscriber automatically deserializes received samples into type T.
-/// Internally constructs a Link role keyexpr from the provided prefix and node ID.
-/// Use `recv()` to get the next deserialized value.
+/// Uses a glob subscription pattern: subscribes to `<prefix>/link/<receiver_id>/*`
+/// to receive messages from any sender to the specified receiver.
+/// The `recv()` method returns both the sender ID and the deserialized value.
 pub struct NodeSubscriber<T> {
     subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
     _phantom: std::marker::PhantomData<T>,
@@ -28,19 +29,18 @@ impl<T> NodeSubscriber<T>
 where
     T: zenoh_ext::Deserialize,
 {
-    /// Create a new subscriber for a Link keyexpr
+    /// Create a new subscriber for a Link keyexpr with receiver_id
     ///
-    /// Immediately declares a Zenoh subscriber for the link keyexpr constructed from
-    /// the given prefix and node ID. The keyexpr pattern will be:
-    /// `<prefix>/link/<node_id>/*` (sender_id=node_id, receiver_id=wildcard)
-    /// to receive all messages for the specified node (as sender).
+    /// Declares a Zenoh subscriber for the link keyexpr pattern:
+    /// `<prefix>/link/<receiver_id>/*` (receiver_id=node_id, sender_id=wildcard)
+    /// to receive all messages sent to the specified receiver from any sender.
     pub async fn new(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
-        node_id: &NodeId,
+        receiver_node_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/link/<node_id>/* (sender_id, receiver_id=*)
-        let node_keyexpr = KeyexprLink::new(prefix, Some(node_id.clone()), None);
+        // Construct Link keyexpr: <prefix>/link/<receiver_id>/* (receiver_id, sender_id=*)
+        let node_keyexpr = KeyexprLink::new(prefix, Some(receiver_node_id.clone()), None);
         let keyexpr: KeyExpr = node_keyexpr.into();
 
         let subscriber = session
@@ -54,20 +54,33 @@ where
         })
     }
 
-    /// Receive and deserialize the next value
+    /// Receive and deserialize the next value with sender information
     ///
-    /// Waits for the next sample from the subscriber and deserializes it into type T.
-    /// Returns an error if reception fails or deserialization fails.
-    pub async fn recv(&mut self) -> Result<T> {
+    /// Waits for the next sample from the subscriber and:
+    /// 1. Parses the sample's keyexpr as KeyexprLink to extract the sender_id
+    /// 2. Deserializes the payload into type T
+    ///
+    /// Returns a tuple of (sender_id, value).
+    /// Returns an error if reception, keyexpr parsing, or deserialization fails.
+    pub async fn recv(&mut self) -> Result<(NodeId, T)> {
         let sample = self
             .subscriber
             .recv_async()
             .await
             .map_err(|e| crate::error::ArenaError::Internal(format!("Failed to receive sample: {}", e)))?;
 
+        // Parse the keyexpr to extract sender_id
+        let keyexpr_link = KeyexprLink::try_from(sample.key_expr().clone().into_owned())?;
+        let sender_id = keyexpr_link.node2_id()
+            .clone()
+            .ok_or_else(|| crate::error::ArenaError::Internal(
+                format!("Received sample with wildcard sender_id in keyexpr '{}'", sample.key_expr())
+            ))?;
+
+        // Deserialize the payload
         let value: T = zenoh_ext::z_deserialize(sample.payload())
             .map_err(|e| crate::error::ArenaError::Serialization(format!("Failed to deserialize: {}", e)))?;
 
-        Ok(value)
+        Ok((sender_id, value))
     }
 }
