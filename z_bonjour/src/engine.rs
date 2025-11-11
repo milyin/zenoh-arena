@@ -23,39 +23,22 @@ impl std::fmt::Display for BonjourState {
 }
 
 /// Game engine that maintains a counter and increments it on each Bonjour action
-pub struct BonjourEngine {
-    input_tx: flume::Sender<(NodeId, BonjourAction)>,
-    #[allow(dead_code)]
-    input_rx: flume::Receiver<(NodeId, BonjourAction)>,
-    #[allow(dead_code)]
-    output_tx: flume::Sender<BonjourState>,
-    output_rx: flume::Receiver<BonjourState>,
-}
+pub struct BonjourEngine;
 
 impl BonjourEngine {
-    pub fn new() -> Self {
-        let (input_tx, input_rx) = flume::unbounded();
-        let (output_tx, output_rx) = flume::unbounded();
-        
+    pub fn new(input_rx: flume::Receiver<(NodeId, BonjourAction)>, output_tx: flume::Sender<BonjourState>) -> Self {
         let mut state = BonjourState::new();
         
         // Spawn a task to process actions
-        let input_rx_clone = input_rx.clone();
-        let output_tx_clone = output_tx.clone();
         std::thread::spawn(move || {
-            while let Ok((_node_id, _action)) = input_rx_clone.recv() {
+            while let Ok((_node_id, _action)) = input_rx.recv() {
                 // Increment counter on each Bonjour action
                 state.counter += 1;
-                let _ = output_tx_clone.send(state.clone());
+                let _ = output_tx.send(state.clone());
             }
         });
 
-        Self {
-            input_tx,
-            input_rx,
-            output_tx,
-            output_rx,
-        }
+        Self
     }
 }
 
@@ -65,14 +48,6 @@ impl GameEngine for BonjourEngine {
 
     fn max_clients(&self) -> Option<usize> {
         Some(2)
-    }
-
-    fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)> {
-        self.input_tx.clone()
-    }
-
-    fn output_receiver(&self) -> flume::Receiver<Self::State> {
-        self.output_rx.clone()
     }
 }
 
@@ -111,20 +86,21 @@ mod tests {
 
     #[test]
     fn test_engine_increments_counter() {
-        let engine = BonjourEngine::new();
+        // Create channels
+        let (input_tx, input_rx) = flume::unbounded();
+        let (output_tx, output_rx) = flume::unbounded();
         
-        // Send actions through the input channel
-        let input_sender = engine.input_sender();
-        let output_receiver = engine.output_receiver();
+        // Create engine
+        let _engine = BonjourEngine::new(input_rx, output_tx);
         
         // Send first action
-        input_sender.send((NodeId::generate(), BonjourAction)).unwrap();
-        let state1 = output_receiver.recv().unwrap();
+        input_tx.send((NodeId::generate(), BonjourAction)).unwrap();
+        let state1 = output_rx.recv().unwrap();
         assert_eq!(state1.counter, 1);
         
         // Send second action
-        input_sender.send((NodeId::generate(), BonjourAction)).unwrap();
-        let state2 = output_receiver.recv().unwrap();
+        input_tx.send((NodeId::generate(), BonjourAction)).unwrap();
+        let state2 = output_rx.recv().unwrap();
         assert_eq!(state2.counter, 2);
     }
 

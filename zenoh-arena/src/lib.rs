@@ -24,29 +24,19 @@
 //! use zenoh_arena::{SessionExt, GameEngine, NodeId, Result};
 //!
 //! // Define your game engine
-//! struct MyEngine {
-//!     input_tx: flume::Sender<(NodeId, String)>,
-//!     input_rx: flume::Receiver<(NodeId, String)>,
-//!     output_tx: flume::Sender<String>,
-//!     output_rx: flume::Receiver<String>,
-//! }
+//! struct MyEngine;
 //! 
 //! impl MyEngine {
-//!     fn new() -> Self {
-//!         let (input_tx, input_rx) = flume::unbounded();
-//!         let (output_tx, output_rx) = flume::unbounded();
-//!         
+//!     fn new(input_rx: flume::Receiver<(NodeId, String)>, output_tx: flume::Sender<String>) -> Self {
 //!         // Spawn a task to process actions
-//!         let input_rx_clone = input_rx.clone();
-//!         let output_tx_clone = output_tx.clone();
 //!         std::thread::spawn(move || {
-//!             while let Ok((_node_id, action)) = input_rx_clone.recv() {
+//!             while let Ok((_node_id, action)) = input_rx.recv() {
 //!                 let state = format!("Processed: {}", action);
-//!                 let _ = output_tx_clone.send(state);
+//!                 let _ = output_tx.send(state);
 //!             }
 //!         });
 //!         
-//!         Self { input_tx, input_rx, output_tx, output_rx }
+//!         Self
 //!     }
 //! }
 //!
@@ -57,14 +47,6 @@
 //!     fn max_clients(&self) -> Option<usize> {
 //!         None // Unlimited clients
 //!     }
-//!     
-//!     fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)> {
-//!         self.input_tx.clone()
-//!     }
-//!     
-//!     fn output_receiver(&self) -> flume::Receiver<Self::State> {
-//!         self.output_rx.clone()
-//!     }
 //! }
 //!
 //! #[tokio::main(flavor = "multi_thread", worker_threads = 1)]
@@ -74,7 +56,7 @@
 //!     
 //!     // Declare an arena node using the extension trait
 //!     let node = session
-//!         .declare_arena_node(|| MyEngine::new())
+//!         .declare_arena_node(|input_rx, output_tx| MyEngine::new(input_rx, output_tx))
 //!         .name("my_node".to_string())
 //!         .unwrap()
 //!         .force_host(true)

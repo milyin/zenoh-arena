@@ -15,16 +15,17 @@ impl SearchingHostState {
     /// Consumes self and returns the next state.
     /// Uses HostQuerier to find and connect to available hosts. If timeout expires or
     /// no hosts are available/accept connection, transitions to Host state.
-    pub(crate) async fn step<E>(
+    pub(crate) async fn step<E, F>(
         self,
         session: &zenoh::Session,
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-        get_engine: &dyn Fn() -> E,
+        get_engine: &F,
     ) -> Result<NodeStateInternal<E>>
     where
         E: GameEngine,
+        F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone,
     {
         tracing::info!("Node '{}' searching for hosts...", node_id);
 
@@ -110,7 +111,7 @@ impl SearchingHostState {
         } else {
             // Transition to Host state
             let next_state = NodeStateInternal::host(
-                get_engine(),
+                get_engine.clone(),
                 session,
                 config.keyexpr_prefix.clone(),
                 node_id,

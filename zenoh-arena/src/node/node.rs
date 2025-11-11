@@ -19,7 +19,7 @@ pub enum NodeCommand<A> {
 ///
 /// A Node is autonomous and manages its own role, connections, and game state.
 /// There is no central "Arena" - each node has its local view of the network.
-pub struct Node<E: GameEngine, F: Fn() -> E> {
+pub struct Node<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> {
     /// Node identifier
     id: NodeId,
 
@@ -46,7 +46,7 @@ pub struct Node<E: GameEngine, F: Fn() -> E> {
     _node_liveliness_token: NodeLivelinessToken,
 }
 
-impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
+impl<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> Node<E, F> {
     /// Create a new Node instance (internal use only - use builder pattern via SessionExt)
     pub(crate) async fn new_internal(
         config: NodeConfig,
@@ -73,10 +73,9 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
         // Initial state depends on force_host configuration
         let state = if config.force_host {
             tracing::info!("Node '{}' forced to host mode", id);
-            let engine = get_engine();
 
             // Use the constructor function to create host state
-            NodeStateInternal::host(engine, &session, config.keyexpr_prefix.clone(), &id)
+            NodeStateInternal::host(get_engine.clone(), &session, config.keyexpr_prefix.clone(), &id)
                 .await?
         } else {
             NodeStateInternal::searching()
@@ -182,12 +181,6 @@ pub trait GameEngine: Send + Sync {
 
     /// Maximum number of clients allowed (None = unlimited)
     fn max_clients(&self) -> Option<usize>;
-
-    /// Get the input channel sender for sending actions to the engine
-    fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)>;
-
-    /// Get the output channel receiver for receiving states from the engine
-    fn output_receiver(&self) -> flume::Receiver<Self::State>;
 }
 
 #[cfg(test)]
@@ -199,34 +192,22 @@ mod tests {
     // Simple test engine for testing purposes
     #[derive(Debug)]
     struct TestEngine {
-        input_tx: flume::Sender<(NodeId, u32)>,
         #[allow(dead_code)]
-        input_rx: flume::Receiver<(NodeId, u32)>,
-        #[allow(dead_code)]
-        output_tx: flume::Sender<String>,
-        output_rx: flume::Receiver<String>,
+        max_clients: Option<usize>,
     }
 
     impl TestEngine {
-        fn new() -> Self {
-            let (input_tx, input_rx) = flume::unbounded();
-            let (output_tx, output_rx) = flume::unbounded();
-            
+        fn new(input_rx: flume::Receiver<(NodeId, u32)>, output_tx: flume::Sender<String>) -> Self {
             // Spawn a task to process actions
-            let input_rx_clone = input_rx.clone();
-            let output_tx_clone = output_tx.clone();
             std::thread::spawn(move || {
-                while let Ok((_node_id, _action)) = input_rx_clone.recv() {
+                while let Ok((_node_id, _action)) = input_rx.recv() {
                     // Process the action
-                    let _ = output_tx_clone.send("processed".to_string());
+                    let _ = output_tx.send("processed".to_string());
                 }
             });
 
             Self {
-                input_tx,
-                input_rx,
-                output_tx,
-                output_rx,
+                max_clients: Some(4),
             }
         }
     }
@@ -236,15 +217,7 @@ mod tests {
         type State = String;
 
         fn max_clients(&self) -> Option<usize> {
-            Some(4)
-        }
-
-        fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)> {
-            self.input_tx.clone()
-        }
-
-        fn output_receiver(&self) -> flume::Receiver<Self::State> {
-            self.output_rx.clone()
+            self.max_clients
         }
     }
 
@@ -287,7 +260,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine::new();
+        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
 
         let result = session.declare_arena_node(get_engine).await;
         assert!(result.is_ok());
@@ -299,7 +272,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_custom_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine::new();
+        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
 
         let result = session
             .declare_arena_node(get_engine)
@@ -315,7 +288,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_invalid_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine::new();
+        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
 
         let builder_result = session
             .declare_arena_node(get_engine)
@@ -333,7 +306,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_step_with_force_host() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine::new();
+        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
 
         let mut node = session
             .declare_arena_node(get_engine)
@@ -359,7 +332,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_force_host_starts_in_host_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine::new();
+        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
 
         let node = session
             .declare_arena_node(get_engine)
@@ -373,7 +346,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine::new();
+        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
 
         let node = session.declare_arena_node(get_engine).await.unwrap();
         // Node should be in SearchingHost state by default
@@ -383,7 +356,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = || TestEngine::new();
+        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
 
         let mut node = session
             .declare_arena_node(get_engine)
@@ -430,7 +403,7 @@ mod tests {
 
         // Use the extension trait to declare a node (name must be called first)
         let node = session
-            .declare_arena_node(|| TestEngine::new())
+            .declare_arena_node(|input_rx, output_tx| TestEngine::new(input_rx, output_tx))
             .name("test_node".to_string())
             .unwrap()
             .force_host(true)

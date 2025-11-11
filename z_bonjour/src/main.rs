@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Declare node with configured parameters
     let mut node_builder = session
-        .declare_arena_node(BonjourEngine::new)
+        .declare_arena_node(|input_rx, output_tx| BonjourEngine::new(input_rx, output_tx))
         .force_host(args.force_host)
         .step_timeout_ms(1000);
 

@@ -14,6 +14,10 @@ where
     pub(crate) connected_clients: Vec<NodeId>,
     /// Game engine (only present in Host mode)
     pub(crate) engine: E,
+    /// Input channel sender (for HostState to send actions to engine)
+    pub(crate) input_tx: flume::Sender<(NodeId, E::Action)>,
+    /// Output channel receiver (for HostState to receive states from engine)
+    pub(crate) output_rx: flume::Receiver<E::State>,
     /// Liveliness token for host discovery
     pub(crate) _liveliness_token: Option<crate::network::NodeLivelinessToken>,
     /// Queryable for host discovery
@@ -78,9 +82,6 @@ where
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
 
-        // Get the output receiver once to avoid lifetime issues
-        let output_receiver = self.engine.output_receiver();
-
         // Process commands until timeout or new state
         while tokio::select! {
             // Timeout elapsed
@@ -116,7 +117,7 @@ where
                             sender_id
                         );
                         // Send action to the engine via input channel
-                        if let Err(e) = self.engine.input_sender().send((sender_id, action)) {
+                        if let Err(e) = self.input_tx.send((sender_id, action)) {
                             tracing::error!(
                                 "Node '{}' failed to send action to engine: {}",
                                 node_id,
@@ -137,7 +138,7 @@ where
                 }
             }
             // State received from engine
-            state_result = output_receiver.recv_async() => {
+            state_result = self.output_rx.recv_async() => {
                 match state_result {
                     Ok(new_game_state) => {
                         self.game_state = Some(new_game_state.clone());
@@ -179,7 +180,7 @@ where
                         node_id
                     );
                     // Send action to the engine via input channel
-                    if let Err(e) = self.engine.input_sender().send((node_id.clone(), action)) {
+                    if let Err(e) = self.input_tx.send((node_id.clone(), action)) {
                         tracing::error!(
                             "Node '{}' failed to send action to engine: {}",
                             node_id,

@@ -12,30 +12,21 @@ pub trait SessionExt {
     /// ```no_run
     /// use zenoh_arena::{SessionExt, GameEngine, NodeId};
     ///
-    /// # struct MyEngine {
-    /// #     input_tx: flume::Sender<(NodeId, String)>,
-    /// #     input_rx: flume::Receiver<(NodeId, String)>,
-    /// #     output_tx: flume::Sender<String>,
-    /// #     output_rx: flume::Receiver<String>,
-    /// # }
+    /// # struct MyEngine;
     /// # impl MyEngine {
-    /// #     fn new() -> Self {
-    /// #         let (input_tx, input_rx) = flume::unbounded();
-    /// #         let (output_tx, output_rx) = flume::unbounded();
-    /// #         Self { input_tx, input_rx, output_tx, output_rx }
+    /// #     fn new(input_rx: flume::Receiver<(NodeId, String)>, output_tx: flume::Sender<String>) -> Self {
+    /// #         Self
     /// #     }
     /// # }
     /// # impl GameEngine for MyEngine {
     /// #     type Action = String;
     /// #     type State = String;
     /// #     fn max_clients(&self) -> Option<usize> { None }
-    /// #     fn input_sender(&self) -> flume::Sender<(NodeId, Self::Action)> { self.input_tx.clone() }
-    /// #     fn output_receiver(&self) -> flume::Receiver<Self::State> { self.output_rx.clone() }
     /// # }
     /// # async fn example() {
     /// let session = zenoh::open(zenoh::Config::default()).await.unwrap();
     /// let node = session
-    ///     .declare_arena_node(|| MyEngine::new())
+    ///     .declare_arena_node(|input_rx, output_tx| MyEngine::new(input_rx, output_tx))
     ///     .await
     ///     .unwrap();
     /// # }
@@ -43,14 +34,14 @@ pub trait SessionExt {
     fn declare_arena_node<E, F>(&self, get_engine: F) -> NodeBuilder<'_, E, F>
     where
         E: GameEngine,
-        F: Fn() -> E;
+        F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone;
 }
 
 impl SessionExt for zenoh::Session {
     fn declare_arena_node<E, F>(&self, get_engine: F) -> NodeBuilder<'_, E, F>
     where
         E: GameEngine,
-        F: Fn() -> E,
+        F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone,
     {
         NodeBuilder::new(self, get_engine)
     }
@@ -60,14 +51,14 @@ impl SessionExt for zenoh::Session {
 ///
 /// Allows configuring the node before creating it, similar to zenoh's builder pattern.
 #[must_use = "Resolvables do nothing unless you resolve them using `.await` or `zenoh::Wait::wait`"]
-pub struct NodeBuilder<'a, E: GameEngine, F: Fn() -> E> {
+pub struct NodeBuilder<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> {
     session: &'a zenoh::Session,
     get_engine: F,
     config: NodeConfig,
     _phantom: std::marker::PhantomData<E>,
 }
 
-impl<'a, E: GameEngine, F: Fn() -> E> NodeBuilder<'a, E, F> {
+impl<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> NodeBuilder<'a, E, F> {
     /// Create a new NodeBuilder
     fn new(session: &'a zenoh::Session, get_engine: F) -> Self {
         Self {
@@ -120,11 +111,11 @@ impl<'a, E: GameEngine, F: Fn() -> E> NodeBuilder<'a, E, F> {
     }
 }
 
-impl<'a, E: GameEngine, F: Fn() -> E> Resolvable for NodeBuilder<'a, E, F> {
+impl<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> Resolvable for NodeBuilder<'a, E, F> {
     type To = Result<Node<E, F>>;
 }
 
-impl<'a, E: GameEngine, F: Fn() -> E + Send + 'a> std::future::IntoFuture
+impl<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone + Send + 'a> std::future::IntoFuture
     for NodeBuilder<'a, E, F>
 {
     type Output = <Self as Resolvable>::To;

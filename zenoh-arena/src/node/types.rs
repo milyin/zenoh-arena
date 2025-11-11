@@ -202,16 +202,24 @@ where
     /// Create a new Host state
     ///
     /// Creates liveliness token and queryable for host discovery
-    pub async fn host(
-        engine: E,
+    pub async fn host<F>(
+        get_engine: F,
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
     ) -> Result<Self>
     where
         E: GameEngine,
+        F: FnOnce(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E,
     {
         let prefix = prefix.into();
+
+        // Create channels for engine communication
+        let (input_tx, input_rx) = flume::unbounded();
+        let (output_tx, output_rx) = flume::unbounded();
+
+        // Create engine with the channels (engine receives input_rx and output_tx)
+        let engine = get_engine(input_rx, output_tx);
 
         // Create host liveliness token for discovery
         let token =
@@ -239,6 +247,8 @@ where
         Ok(NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
             engine,
+            input_tx,
+            output_rx,
             _liveliness_token: Some(token),
             queryable: Some(Arc::new(queryable)),
             client_liveliness_watch,
