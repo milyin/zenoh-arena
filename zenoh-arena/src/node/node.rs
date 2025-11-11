@@ -183,8 +183,18 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
     }
 
     /// Get the current node state without advancing the state machine
-    pub fn state(&self) -> NodeState<E::State> {
-        self.state.to_node_state(&self.game_state)
+    pub fn state(&self) -> NodeState {
+        self.state.to_node_state()
+    }
+
+    /// Get the current node state without game state
+    pub fn node_state(&self) -> NodeState {
+        self.state.to_node_state()
+    }
+
+    /// Get the current game state if available
+    pub fn game_state(&self) -> Option<E::State> {
+        self.game_state.clone()
     }
 }
 

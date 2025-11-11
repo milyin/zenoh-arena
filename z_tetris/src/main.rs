@@ -132,20 +132,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             StepResult::GameState(_) | StepResult::Timeout | StepResult::RoleChanged(_) => {
                 // Get the current state
-                let state = node.state();
+                let state = node.node_state();
+                let game_state = node.game_state();
                 
                 match state {
-                    NodeState::Host {
-                        game_state: Some(game_state),
-                        ..
-                    } | NodeState::Client {
-                        game_state: Some(game_state),
-                        ..
-                    } => {
-                        // Render the game state
-                        if last_render.elapsed() >= render_interval {
-                            render_game(&render_term, &game_state)?;
-                            last_render = std::time::Instant::now();
+                    NodeState::Host { .. } | NodeState::Client { .. } => {
+                        if let Some(game_state) = game_state {
+                            // Render the game state
+                            if last_render.elapsed() >= render_interval {
+                                render_game(&render_term, &game_state)?;
+                                last_render = std::time::Instant::now();
+                            }
                         }
                     }
                     NodeState::SearchingHost => {
