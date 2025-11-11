@@ -98,6 +98,8 @@ pub enum NodeState<S = ()> {
     Client {
         /// ID of the host we're connected to
         host_id: NodeId,
+        /// Current game state received from host (if available)
+        game_state: Option<S>,
     },
     /// Acting as host
     Host {
@@ -116,7 +118,13 @@ impl<S: std::fmt::Display> std::fmt::Display for NodeState<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             NodeState::SearchingHost => write!(f, "Searching for host..."),
-            NodeState::Client { host_id } => write!(f, "Connected as client to host: {}", host_id),
+            NodeState::Client { host_id, game_state } => {
+                if let Some(state) = game_state {
+                    write!(f, "Connected as client to host: {} | State: {}", host_id, state)
+                } else {
+                    write!(f, "Connected as client to host: {}", host_id)
+                }
+            }
             NodeState::Host {
                 is_accepting,
                 connected_clients,
@@ -149,7 +157,7 @@ where
     SearchingHost,
 
     /// Connected as client to a host
-    Client(ClientState<E::Action>),
+    Client(ClientState<E>),
 
     /// Acting as host
     Host(HostState<E>),
@@ -219,6 +227,14 @@ where
         // Create action subscriber to receive actions from clients
         let action_subscriber = NodeSubscriber::new(session, prefix.clone(), LinkType::Action, node_id).await?;
 
+        // Create state publisher to send game state to all clients (using wildcard for receiver)
+        let state_publisher = NodePublisher::new_broadcast(
+            session,
+            prefix.clone(),
+            LinkType::State,
+            node_id,
+        ).await?;
+
         Ok(NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
             engine,
@@ -226,6 +242,7 @@ where
             queryable: Some(Arc::new(queryable)),
             client_liveliness_watch,
             action_subscriber,
+            state_publisher,
             game_state: None,
         }))
     }
@@ -257,10 +274,18 @@ where
         // Create publisher for sending actions to the host
         let action_publisher = NodePublisher::new(
             session,
-            prefix,
+            prefix.clone(),
             LinkType::Action,
             &client_id,
             &host_id,
+        ).await?;
+
+        // Create subscriber for receiving game state from the host
+        let state_subscriber = NodeSubscriber::new(
+            session,
+            prefix,
+            LinkType::State,
+            &client_id,
         ).await?;
 
         Ok(NodeStateInternal::Client(ClientState {
@@ -268,6 +293,8 @@ where
             liveliness_watch,
             _liveliness_token: liveliness_token,
             action_publisher,
+            state_subscriber,
+            game_state: None,
         }))
     }
 }
@@ -281,6 +308,7 @@ where
             NodeStateInternal::SearchingHost => NodeState::SearchingHost,
             NodeStateInternal::Client(client_state) => NodeState::Client {
                 host_id: client_state.host_id.clone(),
+                game_state: client_state.game_state.clone(),
             },
             NodeStateInternal::Host(host_state) => {
                 // Use the centralized is_accepting_clients() method
@@ -308,7 +336,10 @@ mod tests {
     #[test]
     fn test_node_state_display_client() {
         let host_id = NodeId::from_name("test_host".to_string()).unwrap();
-        let state: NodeState<String> = NodeState::Client { host_id };
+        let state: NodeState<String> = NodeState::Client { 
+            host_id,
+            game_state: None,
+        };
         assert_eq!(
             format!("{}", state),
             "Connected as client to host: test_host"

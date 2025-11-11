@@ -144,7 +144,7 @@ impl<E: GameEngine, F: Fn() -> E> Node<E, F> {
             }
             NodeStateInternal::Client(client_state) => {
                 client_state
-                    .step::<E>(&self.config, &self.id, &self.command_rx)
+                    .step(&self.config, &self.id, &self.command_rx)
                     .await
             }
             NodeStateInternal::Host(host_state) => {

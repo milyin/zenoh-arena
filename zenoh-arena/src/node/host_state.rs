@@ -1,7 +1,7 @@
 /// Host state implementation
 use std::sync::Arc;
 
-use crate::{network::{host_queryable::HostRequest, NodeSubscriber}, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
+use crate::{network::{host_queryable::HostRequest, NodePublisher, NodeSubscriber}, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
 use crate::error::Result;
 use crate::network::keyexpr::NodeType;
 
@@ -22,6 +22,8 @@ where
     pub(crate) client_liveliness_watch: crate::network::NodeLivelinessWatch,
     /// Subscriber to receive actions from clients
     pub(crate) action_subscriber: NodeSubscriber<E::Action>,
+    /// Publisher to send game state to all clients
+    pub(crate) state_publisher: NodePublisher<E::State>,
     /// Current game state from the engine
     pub(crate) game_state: Option<E::State>,
 }
@@ -112,7 +114,17 @@ where
                         );
                         // Process action through the engine
                         let new_game_state = self.engine.process_action(action, &sender_id)?;
-                        self.game_state = Some(new_game_state);
+                        self.game_state = Some(new_game_state.clone());
+                        
+                        // Publish game state to all clients
+                        if let Err(e) = self.state_publisher.put(&new_game_state).await {
+                            tracing::error!(
+                                "Node '{}' failed to publish game state: {}",
+                                node_id,
+                                e
+                            );
+                        }
+                        
                         false
                     }
                     Err(e) => {
@@ -142,7 +154,17 @@ where
                     );
                     // Process action directly in the engine
                     let new_game_state = self.engine.process_action(action, node_id)?;
-                    self.game_state = Some(new_game_state);
+                    self.game_state = Some(new_game_state.clone());
+                    
+                    // Publish game state to all clients
+                    if let Err(e) = self.state_publisher.put(&new_game_state).await {
+                        tracing::error!(
+                            "Node '{}' failed to publish game state: {}",
+                            node_id,
+                            e
+                        );
+                    }
+                    
                     false
                 }
             }

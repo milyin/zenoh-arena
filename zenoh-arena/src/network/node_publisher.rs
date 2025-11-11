@@ -58,6 +58,37 @@ where
         })
     }
 
+    /// Create a new broadcast NodePublisher
+    ///
+    /// Declares a publisher on keyexpr with wildcard receiver:
+    /// `<prefix>/<link_type>/<sender_id>/*` (sender_id, receiver_id=*)
+    /// to send messages to all nodes.
+    pub async fn new_broadcast(
+        session: &zenoh::Session,
+        prefix: impl Into<KeyExpr<'static>>,
+        link_type: LinkType,
+        sender_id: &NodeId,
+    ) -> Result<Self> {
+        // Construct Link keyexpr: <prefix>/<link_type>/<sender_id>/*
+        let node_keyexpr = KeyexprLink::new(
+            prefix,
+            link_type,
+            Some(sender_id.clone()),
+            None, // Wildcard receiver
+        );
+        let keyexpr: KeyExpr = node_keyexpr.into();
+        
+        let publisher = session
+            .declare_publisher(keyexpr)
+            .await
+            .map_err(crate::error::ArenaError::Zenoh)?;
+
+        Ok(Self {
+            publisher,
+            _phantom: std::marker::PhantomData,
+        })
+    }
+
     /// Publish a serialized value
     ///
     /// Serializes the value into a ZBytes payload and publishes it.

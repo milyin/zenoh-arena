@@ -1,12 +1,15 @@
 /// Client state implementation
 use crate::node::config::NodeConfig;
 use crate::error::Result;
-use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, NodePublisher};
+use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
 use crate::node::node::{GameEngine, NodeCommand};
 use crate::node::types::{NodeId, NodeStateInternal};
 
 /// State while connected as a client to a host
-pub(crate) struct ClientState<Action> {
+pub(crate) struct ClientState<E>
+where
+    E: GameEngine,
+{
     /// ID of the host we're connected to
     pub(crate) host_id: NodeId,
     /// Watches for host liveliness to detect disconnection
@@ -14,12 +17,16 @@ pub(crate) struct ClientState<Action> {
     /// Client's liveliness token (type: Client) for the host to track disconnection
     pub(crate) _liveliness_token: NodeLivelinessToken,
     /// Publisher for sending actions to the host
-    pub(crate) action_publisher: NodePublisher<Action>,
+    pub(crate) action_publisher: NodePublisher<E::Action>,
+    /// Subscriber for receiving game state from the host
+    pub(crate) state_subscriber: NodeSubscriber<E::State>,
+    /// Current game state received from host
+    pub(crate) game_state: Option<E::State>,
 }
 
-impl<Action> ClientState<Action>
+impl<E> ClientState<E>
 where
-    Action: zenoh_ext::Serialize,
+    E: GameEngine,
 {
     /// Process the Client state - handle commands while connected to a host
     ///
@@ -30,14 +37,12 @@ where
     /// - Host liveliness is lost (transitions back to SearchingHost)
     /// - The step timeout elapses
     /// - A Stop command is received (returns Stop)
-    pub(crate) async fn step<E>(
+    pub(crate) async fn step(
         mut self,
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
     ) -> Result<NodeStateInternal<E>>
-    where
-        E: GameEngine<Action = Action>,
     {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
@@ -64,6 +69,29 @@ where
                             return Ok(NodeStateInternal::SearchingHost);
                         }
                     }
+                }
+                // Game state received from host
+                state_result = self.state_subscriber.recv() => {
+                    match state_result {
+                        Ok((_sender_id, game_state)) => {
+                            tracing::debug!(
+                                "Node '{}' received game state from host '{}'",
+                                node_id,
+                                self.host_id
+                            );
+                            // Store the received game state
+                            self.game_state = Some(game_state);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Node '{}' failed to receive game state: {}",
+                                node_id,
+                                e
+                            );
+                        }
+                    }
+                    // Continue the loop
+                    continue;
                 }
                 // Command received
                 result = command_rx.recv_async() => match result {
