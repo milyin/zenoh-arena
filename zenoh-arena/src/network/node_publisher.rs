@@ -31,50 +31,23 @@ where
     /// Create a new NodePublisher
     ///
     /// Declares a publisher on keyexpr:
-    /// `<prefix>/<link_type>/<sender_id>/<receiver_id>` (sender_id, receiver_id)
-    /// to send messages to the specified remote node.
+    /// - If `receiver_id` is Some: `<prefix>/<link_type>/<sender_id>/<receiver_id>` 
+    ///   to send messages to a specific remote node
+    /// - If `receiver_id` is None: `<prefix>/<link_type>/<sender_id>/*`
+    ///   to broadcast messages to all nodes (wildcard receiver)
     pub async fn new(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         link_type: LinkType,
         sender_id: &NodeId,
-        receiver_id: &NodeId,
+        receiver_id: Option<&NodeId>,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/<link_type>/<sender_id>/<receiver_id>
+        // Construct Link keyexpr with optional receiver (None = wildcard)
         let node_keyexpr = KeyexprLink::new(
             prefix,
             link_type,
             Some(sender_id.clone()),
-            Some(receiver_id.clone()),
-        );
-        let keyexpr: KeyExpr = node_keyexpr.into();        let publisher = session
-            .declare_publisher(keyexpr)
-            .await
-            .map_err(crate::error::ArenaError::Zenoh)?;
-
-        Ok(Self {
-            publisher,
-            _phantom: std::marker::PhantomData,
-        })
-    }
-
-    /// Create a new broadcast NodePublisher
-    ///
-    /// Declares a publisher on keyexpr with wildcard receiver:
-    /// `<prefix>/<link_type>/<sender_id>/*` (sender_id, receiver_id=*)
-    /// to send messages to all nodes.
-    pub async fn new_broadcast(
-        session: &zenoh::Session,
-        prefix: impl Into<KeyExpr<'static>>,
-        link_type: LinkType,
-        sender_id: &NodeId,
-    ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/<link_type>/<sender_id>/*
-        let node_keyexpr = KeyexprLink::new(
-            prefix,
-            link_type,
-            Some(sender_id.clone()),
-            None, // Wildcard receiver
+            receiver_id.cloned(),
         );
         let keyexpr: KeyExpr = node_keyexpr.into();
         

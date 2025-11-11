@@ -228,11 +228,12 @@ where
         let action_subscriber = NodeSubscriber::new(session, prefix.clone(), LinkType::Action, node_id).await?;
 
         // Create state publisher to send game state to all clients (using wildcard for receiver)
-        let state_publisher = NodePublisher::new_broadcast(
+        let state_publisher = NodePublisher::new(
             session,
             prefix.clone(),
             LinkType::State,
             node_id,
+            None, // Broadcast to all clients
         ).await?;
 
         Ok(NodeStateInternal::Host(HostState {
@@ -277,7 +278,7 @@ where
             prefix.clone(),
             LinkType::Action,
             &client_id,
-            &host_id,
+            Some(&host_id),
         ).await?;
 
         // Create subscriber for receiving game state from the host
