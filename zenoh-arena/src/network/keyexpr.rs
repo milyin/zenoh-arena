@@ -280,11 +280,11 @@ define_dual_node_keyexpr!(
 );
 
 define_dual_node_keyexpr!(
-    /// Wrapper for Link role keyexpr: `<prefix>/link/<sender_id>/<receiver_id>`
+    /// Wrapper for Link role keyexpr: `<prefix>/link/<receiver_id>/<sender_id>`
     KeyexprLink,
     "link",
-    sender_id,
     receiver_id,
+    sender_id,
     "Create a new Link keyexpr for data communication"
 );
 
