@@ -163,14 +163,6 @@ impl<S: std::fmt::Display> std::fmt::Display for NodeState<S> {
     }
 }
 
-/// Internal result returned by state step methods
-pub(crate) struct StepStateResult<E: GameEngine> {
-    /// The next state
-    pub(crate) next_state: NodeStateInternal<E>,
-    /// Optional game state if one was produced during this step
-    pub(crate) game_state: Option<E::State>,
-}
-
 /// Current state of a Node (internal)
 pub(crate) enum NodeStateInternal<E>
 where
@@ -332,6 +324,7 @@ where
             _liveliness_token: liveliness_token,
             action_publisher,
             state_subscriber,
+            game_state: None,
         }))
     }
 }
@@ -346,7 +339,7 @@ where
             NodeStateInternal::SearchingHost(_) => NodeState::SearchingHost,
             NodeStateInternal::Client(client_state) => NodeState::Client {
                 host_id: client_state.host_id.clone(),
-                game_state: game_state.clone(),
+                game_state: client_state.game_state.clone(),
             },
             NodeStateInternal::Host(host_state) => {
                 // Use the centralized is_accepting_clients() method

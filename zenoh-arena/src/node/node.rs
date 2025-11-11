@@ -157,7 +157,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
             }
             NodeStateInternal::Client(client_state) => {
                 client_state
-                    .step(&self.config, &self.id, &self.command_rx, self.game_state.clone())
+                    .step(&self.config, &self.id, &self.command_rx)
                     .await?
             }
             NodeStateInternal::Host(host_state) => {

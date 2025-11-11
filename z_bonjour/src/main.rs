@@ -3,7 +3,7 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use z_bonjour::engine::{BonjourAction, BonjourEngine};
 use zenoh::key_expr::KeyExpr;
-use zenoh_arena::{NodeCommand, NodeRole, SessionExt, StepResult};
+use zenoh_arena::{NodeCommand, SessionExt, StepResult};
 
 /// z_bonjour - Zenoh Arena Demo
 #[derive(Parser, Debug)]

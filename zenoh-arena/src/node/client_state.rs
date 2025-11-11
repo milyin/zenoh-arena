@@ -5,7 +5,7 @@ use crate::error::Result;
 use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
 use crate::node::game_engine::GameEngine;
 use crate::node::node::NodeCommand;
-use crate::node::types::{NodeId, NodeStateInternal, StepStateResult};
+use crate::node::types::{NodeId, NodeStateInternal};
 
 /// State while connected as a client to a host
 pub(crate) struct ClientState<E>
@@ -22,6 +22,8 @@ where
     pub(crate) action_publisher: NodePublisher<E::Action>,
     /// Subscriber for receiving game state from the host
     pub(crate) state_subscriber: NodeSubscriber<E::State>,
+    /// Current game state received from the host
+    pub(crate) game_state: Option<E::State>,
 }
 
 impl<E> ClientState<E>
@@ -43,7 +45,6 @@ where
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-        preserved_game_state: Option<E::State>,
     ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)> {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
@@ -64,9 +65,9 @@ where
                     match disconnect_result {
                         Ok(disconnected_id) => {
                             tracing::info!("Node '{}' detected host '{}' disconnection, returning to search with preserved state", node_id, disconnected_id);
-                            // Transition back to SearchingHost, don't pass state here (Node maintains it)
+                            // Transition back to SearchingHost, preserving the game state
                             return Ok((
-                                NodeStateInternal::searching(preserved_game_state),
+                                NodeStateInternal::searching(self.game_state),
                                 StepResult::RoleChanged(NodeRole::SearchingHost)
                             ));
                         }
@@ -74,7 +75,7 @@ where
                             tracing::warn!("Node '{}' liveliness error: {}", node_id, e);
                             // Treat error as disconnect
                             return Ok((
-                                NodeStateInternal::searching(preserved_game_state),
+                                NodeStateInternal::searching(self.game_state),
                                 StepResult::RoleChanged(NodeRole::SearchingHost)
                             ));
                         }
@@ -89,6 +90,8 @@ where
                                 node_id,
                                 self.host_id
                             );
+                            // Store the game state internally
+                            self.game_state = Some(game_state.clone());
                             // Return immediately with the received game state
                             return Ok((
                                 NodeStateInternal::Client(self),

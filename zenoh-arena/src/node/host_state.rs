@@ -10,7 +10,7 @@ use crate::{
         config::NodeConfig,
         game_engine::GameEngine,
         node::NodeCommand,
-        types::{NodeId, NodeStateInternal, StepStateResult},
+        types::{NodeId, NodeStateInternal},
     },
 };
 

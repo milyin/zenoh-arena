@@ -5,7 +5,7 @@ use std::time::Duration;
 use z_tetris::engine::{TetrisAction, TetrisEngine};
 use z_tetris::{Action, AnsiTermStyle, GameFieldPair, TermRender, TetrisPairState};
 use zenoh::key_expr::KeyExpr;
-use zenoh_arena::{Node, NodeCommand, NodeState, SessionExt, StepResult};
+use zenoh_arena::{NodeCommand, NodeState, SessionExt, StepResult};
 
 /// z_tetris - Zenoh Arena Tetris Game
 #[derive(Parser, Debug)]
