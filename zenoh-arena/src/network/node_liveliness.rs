@@ -26,12 +26,12 @@ impl NodeLivelinessToken {
     /// Before creating the token, performs a liveliness.get() request to check if
     /// another token with the same keyexpr already exists in the network.
     /// If a conflict is detected, returns a LivelinessTokenConflict error.
-    pub async fn declare<K: KeyexprNodeTrait>(
+    pub async fn declare<K: Into<KeyExpr<'static>> + KeyexprNodeTrait>(
         session: &zenoh::Session,
         keyexpr: K,
     ) -> Result<Self> {
         let node_id = keyexpr.node_id().clone().expect("node_id must be specified for liveliness token");
-        let keyexpr: KeyExpr = keyexpr.to_keyexpr();
+        let keyexpr: KeyExpr = keyexpr.into();
 
         // Check if another token with the same keyexpr already exists
         let replies = session
@@ -84,7 +84,7 @@ impl<K: KeyexprNodeTrait> std::fmt::Debug for NodeLivelinessWatch<K> {
     }
 }
 
-impl<K: KeyexprNodeTrait> NodeLivelinessWatch<K> {
+impl<K: KeyexprNodeTrait + Into<KeyExpr<'static>>> NodeLivelinessWatch<K> {
     /// Create a new liveliness watch without any subscribers
     pub fn new() -> Self {
         Self {
@@ -106,8 +106,9 @@ impl<K: KeyexprNodeTrait> NodeLivelinessWatch<K> {
         &mut self,
         session: &zenoh::Session,
         keyexpr: K,
-    ) -> Result<()> {
-        let keyexpr: KeyExpr = keyexpr.to_keyexpr();
+    ) -> Result<()>
+    {
+        let keyexpr: KeyExpr = keyexpr.into();
 
         let subscriber = session
             .liveliness()

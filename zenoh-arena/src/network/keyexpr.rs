@@ -8,9 +8,6 @@ use zenoh::key_expr::KeyExpr;
 pub trait KeyexprNodeTrait {
     /// Get the node ID (None means wildcard)
     fn node_id(&self) -> &Option<NodeId>;
-    
-    /// Convert to KeyExpr
-    fn to_keyexpr(&self) -> KeyExpr<'static>;
 }
 
 /// Trait for keyexpr types that have two node IDs
@@ -111,10 +108,6 @@ macro_rules! define_single_node_keyexpr {
         impl KeyexprNodeTrait for $name {
             fn node_id(&self) -> &Option<NodeId> {
                 &self.$id_name
-            }
-
-            fn to_keyexpr(&self) -> KeyExpr<'static> {
-                self.clone().into()
             }
         }
     };
@@ -240,10 +233,6 @@ macro_rules! define_dual_node_keyexpr {
         impl KeyexprNodeTrait for $name {
             fn node_id(&self) -> &Option<NodeId> {
                 &self.$id_a_name
-            }
-
-            fn to_keyexpr(&self) -> KeyExpr<'static> {
-                self.clone().into()
             }
         }
 
@@ -494,24 +483,24 @@ mod tests {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
         let node_id = NodeId::from_name("mynode".to_string()).unwrap();
 
-        // Test to_keyexpr for single-node types
+        // Test Into<KeyExpr> for single-node types
         let node_keyexpr = KeyexprNode::new(prefix.clone(), Some(node_id.clone()));
-        let keyexpr = node_keyexpr.to_keyexpr();
+        let keyexpr: KeyExpr = node_keyexpr.into();
         assert_eq!(keyexpr.as_str(), "arena/game1/node/mynode");
 
         let host_keyexpr = KeyexprHost::new(prefix.clone(), Some(node_id.clone()));
-        let keyexpr = host_keyexpr.to_keyexpr();
+        let keyexpr: KeyExpr = host_keyexpr.into();
         assert_eq!(keyexpr.as_str(), "arena/game1/host/mynode");
 
-        // Test to_keyexpr for dual-node types
+        // Test Into<KeyExpr> for dual-node types
         let node2 = NodeId::from_name("other".to_string()).unwrap();
         let link_keyexpr = KeyexprLink::new(prefix.clone(), Some(node_id.clone()), Some(node2.clone()));
-        let keyexpr = link_keyexpr.to_keyexpr();
+        let keyexpr: KeyExpr = link_keyexpr.into();
         assert_eq!(keyexpr.as_str(), "arena/game1/link/mynode/other");
 
         // Test with wildcard
         let host_keyexpr = KeyexprHost::new(prefix, None);
-        let keyexpr = host_keyexpr.to_keyexpr();
+        let keyexpr: KeyExpr = host_keyexpr.into();
         assert_eq!(keyexpr.as_str(), "arena/game1/host/*");
     }
 }
