@@ -12,7 +12,6 @@ pub(crate) struct ClientState<Action> {
     /// Watches for host liveliness to detect disconnection
     pub(crate) liveliness_watch: NodeLivelinessWatch,
     /// Client's liveliness token (type: Client) for the host to track disconnection
-    #[allow(dead_code)]
     pub(crate) liveliness_token: NodeLivelinessToken,
     /// Publisher for sending actions to the host
     pub(crate) action_publisher: NodePublisher<Action>,

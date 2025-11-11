@@ -5,7 +5,7 @@ use zenoh::key_expr::KeyExpr;
 
 use crate::error::{ArenaError, Result};
 use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
-use crate::network::keyexpr::{KeyexprNode, NodeType};
+use crate::network::keyexpr::{KeyexprNode, LinkType, NodeType};
 use crate::node::client_state::ClientState;
 use crate::node::host_state::HostState;
 use crate::node::node::GameEngine;
@@ -151,7 +151,6 @@ where
     SearchingHost,
 
     /// Connected as client to a host
-    #[allow(dead_code)]
     Client(ClientState<E::Action>),
 
     /// Acting as host
@@ -187,22 +186,9 @@ impl<E> NodeStateInternal<E>
 where
     E: GameEngine,
 {
-    /// Check if currently in host mode
-    #[allow(dead_code)]
-    pub fn is_host(&self) -> bool {
-        matches!(self, NodeStateInternal::Host(_))
-    }
-
-    /// Check if currently in client mode
-    #[allow(dead_code)]
-    pub fn is_client(&self) -> bool {
-        matches!(self, NodeStateInternal::Client(_))
-    }
-
     /// Check if host mode and accepting clients
     ///
     /// Host is accepting when it has a queryable and client count is below max_clients
-    #[allow(dead_code)]
     pub fn is_accepting_clients(&self) -> bool {
         match self {
             NodeStateInternal::Host(host_state) => {
@@ -223,19 +209,9 @@ where
         }
     }
 
-    /// Get number of connected clients (None if not host)
-    #[allow(dead_code)]
-    pub fn client_count(&self) -> Option<usize> {
-        match self {
-            NodeStateInternal::Host(host_state) => Some(host_state.connected_clients.len()),
-            _ => None,
-        }
-    }
-
     /// Transition to SearchingHost state from any state
     ///
     /// Drops the current state (including engine and liveliness token if in Host mode)
-    #[allow(dead_code)]
     pub fn searching(&mut self) {
         *self = NodeStateInternal::SearchingHost;
     }
@@ -268,7 +244,7 @@ where
         let client_liveliness_watch = NodeLivelinessWatch::new();
 
         // Create action subscriber to receive actions from clients
-        let action_subscriber = NodeSubscriber::new(session, prefix.clone(), crate::network::keyexpr::LinkType::Action, node_id).await?;
+        let action_subscriber = NodeSubscriber::new(session, prefix.clone(), LinkType::Action, node_id).await?;
 
         *self = NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
@@ -314,7 +290,7 @@ where
         let action_publisher = NodePublisher::new(
             session,
             prefix,
-            crate::network::keyexpr::LinkType::Action,
+            LinkType::Action,
             &client_id,
             &host_id,
         ).await?;
@@ -407,7 +383,6 @@ mod tests {
     #[test]
     fn test_node_state_display_host_with_game_state() {
         #[derive(Debug)]
-        #[allow(dead_code)]
         struct TestGameState {
             score: u32,
         }

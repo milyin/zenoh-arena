@@ -14,10 +14,8 @@ use zenoh::sample::SampleKind;
 /// The token is automatically undeclared when dropped.
 #[derive(Debug)]
 pub struct NodeLivelinessToken {
-    #[allow(dead_code)]
-    token: LivelinessToken,
-    #[allow(dead_code)]
-    node_id: NodeId,
+    _token: LivelinessToken,
+    _node_id: NodeId,
 }
 
 impl NodeLivelinessToken {
@@ -55,7 +53,7 @@ impl NodeLivelinessToken {
             .await
             .map_err(crate::error::ArenaError::Zenoh)?;
 
-        Ok(Self { token, node_id })
+        Ok(Self { _token: token, _node_id: node_id })
     }
 }
 
@@ -107,15 +105,6 @@ impl NodeLivelinessWatch {
 
         self.subscribers.push(subscriber);
         Ok(())
-    }
-
-    /// Unsubscribe from liveliness events
-    ///
-    /// Removes the most recently added subscriber from the watch.
-    /// Returns `true` if a subscriber was removed, `false` if there are no subscribers.
-    #[allow(dead_code)]
-    pub fn unsubscribe(&mut self) -> bool {
-        self.subscribers.pop().is_some()
     }
 
     /// Wait for any subscriber to disconnect (liveliness lost)
