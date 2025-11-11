@@ -268,7 +268,7 @@ where
         let client_liveliness_watch = NodeLivelinessWatch::new();
 
         // Create action subscriber to receive actions from clients
-        let action_subscriber = NodeSubscriber::new(session, prefix.clone(), node_id).await?;
+        let action_subscriber = NodeSubscriber::new(session, prefix.clone(), crate::network::keyexpr::LinkType::Action, node_id).await?;
 
         *self = NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
@@ -314,6 +314,7 @@ where
         let action_publisher = NodePublisher::new(
             session,
             prefix,
+            crate::network::keyexpr::LinkType::Action,
             &client_id,
             &host_id,
         ).await?;

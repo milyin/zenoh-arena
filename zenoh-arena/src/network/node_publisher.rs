@@ -31,18 +31,19 @@ where
     /// Create a new NodePublisher
     ///
     /// Declares a publisher on keyexpr:
-    /// `<prefix>/action/<sender_id>/<receiver_id>` (sender_id, receiver_id)
+    /// `<prefix>/<link_type>/<sender_id>/<receiver_id>` (sender_id, receiver_id)
     /// to send messages to the specified remote node.
     pub async fn new(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
+        link_type: LinkType,
         sender_id: &NodeId,
         receiver_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/action/<sender_id>/<receiver_id>
+        // Construct Link keyexpr: <prefix>/<link_type>/<sender_id>/<receiver_id>
         let node_keyexpr = KeyexprLink::new(
             prefix,
-            LinkType::Action,
+            link_type,
             Some(sender_id.clone()),
             Some(receiver_id.clone()),
         );

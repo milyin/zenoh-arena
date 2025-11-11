@@ -32,15 +32,16 @@ where
     /// Create a new subscriber for a Link keyexpr with receiver_id
     ///
     /// Declares a Zenoh subscriber for the link keyexpr pattern:
-    /// `<prefix>/action/*/<receiver_id>` (sender_id=wildcard, receiver_id=node_id)
+    /// `<prefix>/<link_type>/*/<receiver_id>` (sender_id=wildcard, receiver_id=node_id)
     /// to receive all messages sent to the specified receiver from any sender.
     pub async fn new(
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
+        link_type: LinkType,
         receiver_node_id: &NodeId,
     ) -> Result<Self> {
-        // Construct Link keyexpr: <prefix>/action/*/<receiver_id> (sender_id=*, receiver_id)
-        let node_keyexpr = KeyexprLink::new(prefix, LinkType::Action, None, Some(receiver_node_id.clone()));
+        // Construct Link keyexpr: <prefix>/<link_type>/*/<receiver_id> (sender_id=*, receiver_id)
+        let node_keyexpr = KeyexprLink::new(prefix, link_type, None, Some(receiver_node_id.clone()));
         let keyexpr: KeyExpr = node_keyexpr.into();
 
         let subscriber = session
