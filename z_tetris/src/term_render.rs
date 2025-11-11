@@ -38,7 +38,7 @@ pub trait TermRender {
 }
 
 // Make all lines in block the same width by padding with TermCell::Space
-pub fn pad_block_right(block: &mut Vec<Vec<TermCell>>, style: &impl TermStyle) {
+pub fn pad_block_right(block: &mut [Vec<TermCell>], style: &impl TermStyle) {
     // Requite that the width of TermCell::Space display is 1
     assert_eq!(style.width(&TermCell::Space), 1);
     // calculate width of each line of the block and the maximum width

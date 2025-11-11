@@ -4,7 +4,7 @@ use crate::node::config::NodeConfig;
 use crate::error::Result;
 use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
 use crate::node::game_engine::GameEngine;
-use crate::node::node::NodeCommand;
+use crate::node::arena_node::NodeCommand;
 use crate::node::types::{NodeId, NodeStateInternal};
 
 /// State while connected as a client to a host

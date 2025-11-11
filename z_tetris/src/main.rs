@@ -105,13 +105,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     _ => None,
                 };
 
-                if let Some(act) = action {
-                    if keyboard_sender
+                if let Some(act) = action
+                    && keyboard_sender
                         .send(NodeCommand::GameAction(TetrisAction { action: act }))
                         .is_err()
-                    {
-                        break;
-                    }
+                {
+                    break;
                 }
             }
         }

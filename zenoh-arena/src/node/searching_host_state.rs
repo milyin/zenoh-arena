@@ -4,7 +4,7 @@ use crate::{NodeRole, StepResult};
 use crate::error::Result;
 use crate::network::HostQuerier;
 use super::game_engine::{EngineFactory, GameEngine};
-use super::node::NodeCommand;
+use super::arena_node::NodeCommand;
 use super::types::{NodeId, NodeStateInternal};
 use rand::Rng;
 

@@ -1,7 +1,7 @@
 use zenoh::{Resolvable, key_expr::KeyExpr};
 use crate::error::Result;
 
-use crate::node::{config::NodeConfig, game_engine::{EngineFactory, GameEngine}, node::Node, types::NodeId};
+use crate::node::{config::NodeConfig, game_engine::{EngineFactory, GameEngine}, arena_node::Node, types::NodeId};
 
 /// Extension trait for zenoh::Session to declare arena nodes
 /// Extension trait for zenoh::Session to add arena node declaration

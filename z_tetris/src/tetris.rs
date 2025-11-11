@@ -291,8 +291,8 @@ impl Tetromino {
         Tetromino {
             tetromino_type,
             rotation,
-            x: x,
-            y: y,
+            x,
+            y,
         }
     }
 
@@ -550,11 +550,9 @@ impl Tetris {
             if self.current.is_none() {
                 if self.remove_top_blasted_line() {
                     return StepResult::LineRemoved;
-                } else {
-                    if !self.place_next_tetromino() {
-                        self.game_over = true;
-                        return StepResult::GameOver;
-                    }
+                } else if !self.place_next_tetromino() {
+                    self.game_over = true;
+                    return StepResult::GameOver;
                 }
             }
         }
@@ -588,7 +586,7 @@ impl Tetris {
             self.actions.clear();
             self.line_remove_delay = Some(10); // Wait 10 ticks before placing next tetromino to show blast animation
         }
-        return StepResult::ActionPerformed(action, succeed);
+        StepResult::ActionPerformed(action, succeed)
     }
 
     // Create next tetromino type and draw it on preview field
@@ -655,15 +653,15 @@ impl Tetris {
         let new_tetromino = Tetromino::new(
             current.tetromino_type,
             current.rotation + rotation,
-            current.x as isize + x,
-            current.y as isize + y,
+            current.x + x,
+            current.y + y,
         );
         // Check if new tetromino intersects with field borders or other tetrominos
         if new_tetromino.intersects(&self.well) {
             return false;
         }
         *current = new_tetromino;
-        return true;
+        true
     }
 
     // Move current tetromino down, if it's possible

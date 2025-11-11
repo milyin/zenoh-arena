@@ -19,14 +19,17 @@ impl FrequencyRegulator {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_events(&self) -> usize {
         self.events
     }
 
+    #[allow(dead_code)]
     pub fn get_steps(&self) -> usize {
         self.steps
     }
 
+    #[allow(dead_code)]
     pub fn set(&mut self, events: usize, steps: usize) {
         self.events = events;
         self.steps = steps;
@@ -37,7 +40,7 @@ impl FrequencyRegulator {
     /// Returns the number of events to generate this step
     pub fn step(&mut self) -> usize {
         let events_to_generate_this_step =
-            (self.events * (self.current_step + 1) + self.steps - 1) / self.steps - self.events_generated;
+            (self.events * (self.current_step + 1)).div_ceil(self.steps) - self.events_generated;
 
         self.events_generated += events_to_generate_this_step;
 

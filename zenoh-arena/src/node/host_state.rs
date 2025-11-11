@@ -9,7 +9,7 @@ use crate::{
     node::{
         config::NodeConfig,
         game_engine::GameEngine,
-        node::NodeCommand,
+        arena_node::NodeCommand,
         types::{NodeId, NodeStateInternal},
     },
 };

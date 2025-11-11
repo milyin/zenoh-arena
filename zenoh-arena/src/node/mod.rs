@@ -1,5 +1,5 @@
 // Module declarations
-pub(crate) mod node;
+pub(crate) mod arena_node;
 pub(crate) mod config;
 pub(crate) mod client_state;
 pub(crate) mod game_engine;

@@ -77,6 +77,6 @@ pub(crate) mod error;
 // Re-exports external API
 pub use error::{ArenaError, Result};
 pub use node::game_engine::{EngineFactory, GameEngine};
-pub use node::node::{Node, NodeCommand};
+pub use node::arena_node::{Node, NodeCommand};
 pub use node::session_ext::{NodeBuilder, SessionExt};
 pub use node::types::{NodeId, NodeInfo, NodeRole, NodeState, StepResult};
