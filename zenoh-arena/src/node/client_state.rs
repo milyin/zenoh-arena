@@ -1,12 +1,12 @@
 /// Client state implementation
 use crate::node::config::NodeConfig;
 use crate::error::Result;
-use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, KeyexprHost};
+use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, KeyexprHost, NodePublisher};
 use crate::node::node::{GameEngine, NodeCommand};
 use crate::node::types::{NodeId, NodeStateInternal};
 
 /// State while connected as a client to a host
-pub(crate) struct ClientState {
+pub(crate) struct ClientState<Action> {
     /// ID of the host we're connected to
     pub(crate) host_id: NodeId,
     /// Watches for host liveliness to detect disconnection
@@ -14,9 +14,14 @@ pub(crate) struct ClientState {
     /// Client's liveliness token (role: Client) for the host to track disconnection
     #[allow(dead_code)]
     pub(crate) liveliness_token: NodeLivelinessToken,
+    /// Publisher for sending actions to the host
+    pub(crate) action_publisher: NodePublisher<Action>,
 }
 
-impl ClientState {
+impl<Action> ClientState<Action>
+where
+    Action: zenoh_ext::Serialize,
+{
     /// Process the Client state - handle commands while connected to a host
     ///
     /// Consumes self and returns the next state.
@@ -33,7 +38,7 @@ impl ClientState {
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
     ) -> Result<NodeStateInternal<E>>
     where
-        E: GameEngine,
+        E: GameEngine<Action = Action>,
     {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_ms);
         let sleep = tokio::time::sleep(timeout);
@@ -71,14 +76,21 @@ impl ClientState {
                         tracing::info!("Node '{}' received Stop command, exiting", node_id);
                         return Ok(NodeStateInternal::Stop);
                     }
-                    Ok(NodeCommand::GameAction(_action)) => {
+                    Ok(NodeCommand::GameAction(action)) => {
                         tracing::debug!(
                             "Node '{}' forwarding action to host '{}'",
                             node_id,
                             self.host_id
                         );
-                        // TODO: Forward action to remote host via Zenoh pub/sub
-                        // Placeholder for Phase 4 implementation
+                        // Send action to remote host via Zenoh pub/sub
+                        if let Err(e) = self.action_publisher.put(&action).await {
+                            tracing::error!(
+                                "Node '{}' failed to send action to host '{}': {}",
+                                node_id,
+                                self.host_id,
+                                e
+                            );
+                        }
                         // Continue the loop
                         continue;
                     }

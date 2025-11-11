@@ -150,7 +150,7 @@ where
 
     /// Connected as client to a host
     #[allow(dead_code)]
-    Client(ClientState),
+    Client(ClientState<E::Action>),
 
     /// Acting as host
     Host(HostState<E>),
@@ -287,8 +287,11 @@ where
         prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
         client_id: NodeId,
-    ) -> Result<()> {
-        use crate::network::NodeLivelinessWatch;
+    ) -> Result<()>
+    where
+        E::Action: zenoh_ext::Serialize,
+    {
+        use crate::network::{NodeLivelinessWatch, NodePublisher};
 
         let prefix = prefix.into();
 
@@ -300,14 +303,23 @@ where
             .await?;
 
         // Declare client liveliness token (role: Client) so host can track our presence
-        let client_keyexpr = KeyexprClient::new(prefix, Some(client_id.clone()));
+        let client_keyexpr = KeyexprClient::new(prefix.clone(), Some(client_id.clone()));
         let liveliness_token =
             NodeLivelinessToken::declare(session, client_keyexpr).await?;
+
+        // Create publisher for sending actions to the host
+        let action_publisher = NodePublisher::new(
+            session,
+            prefix,
+            &client_id,
+            &host_id,
+        ).await?;
 
         *self = NodeStateInternal::Client(ClientState {
             host_id,
             liveliness_watch,
             liveliness_token,
+            action_publisher,
         });
 
         Ok(())
