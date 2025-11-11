@@ -16,6 +16,7 @@ pub struct TetrisEngine;
 
 impl TetrisEngine {
     pub fn new(
+        host_id: NodeId,
         input_rx: flume::Receiver<(NodeId, TetrisAction)>,
         output_tx: flume::Sender<TetrisPairState>,
         _initial_state: Option<TetrisPairState>,
@@ -37,20 +38,24 @@ impl TetrisEngine {
                 
                 // Process all pending actions using try_recv
                 while let Ok((client_id, action)) = input_rx.try_recv() {
-                    // Assign player IDs on first action
-                    if player_id.is_none() {
-                        player_id = Some(client_id.clone());
-                    } else if opponent_id.is_none() && player_id.as_ref() != Some(&client_id) {
-                        opponent_id = Some(client_id.clone());
-                    }
-
-                    // Determine which player sent the action
-                    let player_side = if player_id.as_ref() == Some(&client_id) {
+                    // Determine which player this is based on host_id
+                    let player_side = if client_id == host_id {
+                        // Host is always the Player side
+                        if player_id.is_none() {
+                            player_id = Some(client_id.clone());
+                        }
                         PlayerSide::Player
-                    } else if opponent_id.as_ref() == Some(&client_id) {
-                        PlayerSide::Opponent
                     } else {
-                        continue; // Unknown player, skip
+                        // First non-host client is the Opponent side
+                        if opponent_id.is_none() {
+                            opponent_id = Some(client_id.clone());
+                        }
+                        if opponent_id.as_ref() == Some(&client_id) {
+                            PlayerSide::Opponent
+                        } else {
+                            // Unknown/extra client, skip
+                            continue;
+                        }
                     };
 
                     // Add action to the appropriate player
@@ -59,7 +64,10 @@ impl TetrisEngine {
                 
                 // Perform game step and send state only if something changed
                 if tetris_pair.step() != (StepResult::None, StepResult::None) {
-                    let _ = output_tx.send(tetris_pair.get_state());
+                    let mut state = tetris_pair.get_state();
+                    state.player_id = player_id.as_ref().map(|id| id.to_string());
+                    state.opponent_id = opponent_id.as_ref().map(|id| id.to_string());
+                    let _ = output_tx.send(state);
                 }
                 
                 // Maintain consistent timing

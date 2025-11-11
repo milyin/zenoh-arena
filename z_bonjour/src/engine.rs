@@ -36,6 +36,7 @@ pub struct BonjourEngine;
 
 impl BonjourEngine {
     pub fn new(
+        _host_id: NodeId,
         input_rx: flume::Receiver<(NodeId, BonjourAction)>,
         output_tx: flume::Sender<BonjourState>,
         initial_state: Option<BonjourState>,
@@ -131,7 +132,8 @@ mod tests {
         let (output_tx, output_rx) = flume::unbounded();
         
         // Create engine with no initial state
-        let _engine = BonjourEngine::new(input_rx, output_tx, None);
+        let host_id = NodeId::generate();
+        let _engine = BonjourEngine::new(host_id, input_rx, output_tx, None);
         
         // Send first Bonjour action
         input_tx.send((NodeId::generate(), BonjourAction::Bonjour)).unwrap();
@@ -151,7 +153,8 @@ mod tests {
         let (output_tx, output_rx) = flume::unbounded();
         
         // Create engine with no initial state
-        let _engine = BonjourEngine::new(input_rx, output_tx, None);
+        let host_id = NodeId::generate();
+        let _engine = BonjourEngine::new(host_id, input_rx, output_tx, None);
         
         // Send Bonsoir action
         input_tx.send((NodeId::generate(), BonjourAction::Bonsoir)).unwrap();
@@ -171,7 +174,8 @@ mod tests {
         let (output_tx, output_rx) = flume::unbounded();
         
         // Create engine with no initial state
-        let _engine = BonjourEngine::new(input_rx, output_tx, None);
+        let host_id = NodeId::generate();
+        let _engine = BonjourEngine::new(host_id, input_rx, output_tx, None);
         
         // Bonjour +1
         input_tx.send((NodeId::generate(), BonjourAction::Bonjour)).unwrap();

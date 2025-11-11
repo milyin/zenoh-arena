@@ -213,7 +213,7 @@ mod tests {
     }
 
     impl TestEngine {
-        fn new(input_rx: flume::Receiver<(NodeId, u32)>, output_tx: flume::Sender<String>) -> Self {
+        fn new(_host_id: NodeId, input_rx: flume::Receiver<(NodeId, u32)>, output_tx: flume::Sender<String>) -> Self {
             // Spawn a task to process actions
             std::thread::spawn(move || {
                 while let Ok((_node_id, _action)) = input_rx.recv() {
@@ -276,7 +276,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
+        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
 
         let result = session.declare_arena_node(get_engine).await;
         assert!(result.is_ok());
@@ -288,7 +288,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_custom_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
+        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
 
         let result = session
             .declare_arena_node(get_engine)
@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_invalid_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
+        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
 
         let builder_result = session
             .declare_arena_node(get_engine)
@@ -322,7 +322,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_step_with_force_host() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
+        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
 
         let mut node = session
             .declare_arena_node(get_engine)
@@ -348,7 +348,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_force_host_starts_in_host_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
+        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
 
         let node = session
             .declare_arena_node(get_engine)
@@ -362,7 +362,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
+        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
 
         let node = session.declare_arena_node(get_engine).await.unwrap();
         // Node should be in SearchingHost state by default
@@ -372,7 +372,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
+        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
 
         let mut node = session
             .declare_arena_node(get_engine)
@@ -411,7 +411,7 @@ mod tests {
 
         // Use the extension trait to declare a node (name must be called first)
         let node = session
-            .declare_arena_node(|input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx))
+            .declare_arena_node(|host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx))
             .name("test_node".to_string())
             .unwrap()
             .force_host(true)

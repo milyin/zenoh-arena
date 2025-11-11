@@ -225,7 +225,7 @@ where
         let (output_tx, output_rx) = flume::unbounded();
 
         // Create engine with the channels and optional initial state
-        let engine = get_engine(input_rx, output_tx, initial_state);
+        let engine = get_engine(node_id.clone(), input_rx, output_tx, initial_state);
 
         // Create host liveliness token for discovery
         let token =

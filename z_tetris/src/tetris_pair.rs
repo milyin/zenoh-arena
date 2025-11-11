@@ -98,6 +98,8 @@ impl TetrisPair {
         TetrisPairState {
             player: self.player.get_state(),
             opponent: self.opponent.get_state(),
+            player_id: None,
+            opponent_id: None,
         }
     }
 }

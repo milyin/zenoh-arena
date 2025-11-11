@@ -15,6 +15,7 @@ pub trait SessionExt {
     /// # struct MyEngine;
     /// # impl MyEngine {
     /// #     fn new(
+    /// #         _host_id: NodeId,
     /// #         input_rx: flume::Receiver<(NodeId, String)>,
     /// #         output_tx: flume::Sender<String>,
     /// #         _initial_state: Option<String>,

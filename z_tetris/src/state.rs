@@ -13,6 +13,8 @@ pub struct TetrisState {
 pub struct TetrisPairState {
     pub player: TetrisState,
     pub opponent: TetrisState,
+    pub player_id: Option<String>,
+    pub opponent_id: Option<String>,
 }
 
 impl TetrisPairState {
