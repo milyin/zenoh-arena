@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .step_timeout_ms(1000);
 
     // Apply name if provided
-    if let Some(name) = args.name.clone().into() {
+    if let Some(name) = args.name.clone() {
         node_builder = node_builder.name(name)?;
     }
 
