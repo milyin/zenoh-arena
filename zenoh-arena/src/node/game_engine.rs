@@ -25,7 +25,7 @@ pub trait GameEngine: Send + Sync {
 ///
 /// # Type Parameters
 /// * `E` - The GameEngine type to be created
-/// * `F` - The factory function type that implements `Fn + Clone`
+/// * `F` - The factory function type that implements `Fn`
 ///
 /// # Example
 /// ```ignore
@@ -39,11 +39,11 @@ pub trait GameEngine: Send + Sync {
 pub trait EngineFactory<E: GameEngine>: Fn(
     flume::Receiver<(NodeId, E::Action)>,
     flume::Sender<E::State>
-) -> E + Clone {}
+) -> E + Send + Sync {}
 
 // Blanket implementation for all types that satisfy the trait bounds
 impl<E, F> EngineFactory<E> for F
 where
     E: GameEngine,
-    F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone,
+    F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Send + Sync,
 {}

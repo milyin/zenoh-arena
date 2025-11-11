@@ -1,6 +1,8 @@
 /// Node management module
+use std::sync::Arc;
+
 use super::config::NodeConfig;
-use super::game_engine::GameEngine;
+use super::game_engine::{EngineFactory, GameEngine};
 use crate::error::{ArenaError, Result};
 use crate::network::NodeLivelinessToken;
 use crate::network::keyexpr::NodeType;
@@ -20,7 +22,7 @@ pub enum NodeCommand<A> {
 ///
 /// A Node is autonomous and manages its own role, connections, and game state.
 /// There is no central "Arena" - each node has its local view of the network.
-pub struct Node<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> {
+pub struct Node<E: GameEngine, F: EngineFactory<E>> {
     /// Node identifier
     id: NodeId,
 
@@ -34,7 +36,7 @@ pub struct Node<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume
     session: zenoh::Session,
 
     /// Engine factory - called when transitioning to host mode
-    get_engine: F,
+    get_engine: Arc<F>,
 
     /// Receiver for commands from the application
     command_rx: flume::Receiver<NodeCommand<E::Action>>,
@@ -47,7 +49,7 @@ pub struct Node<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume
     _node_liveliness_token: NodeLivelinessToken,
 }
 
-impl<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> Node<E, F> {
+impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
     /// Create a new Node instance (internal use only - use builder pattern via SessionExt)
     pub(crate) async fn new_internal(
         config: NodeConfig,
@@ -57,6 +59,9 @@ impl<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E:
         let id = config.node_id.clone();
 
         tracing::info!("Node '{}' initialized with Zenoh session", id);
+
+        // Wrap the engine factory in Arc for shared ownership
+        let get_engine = Arc::new(get_engine);
 
         // Create liveliness token for this node's identity (NodeType::Node)
         // This protects the node name from conflicts with other nodes
@@ -76,7 +81,14 @@ impl<E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E:
             tracing::info!("Node '{}' forced to host mode", id);
 
             // Use the constructor function to create host state
-            NodeStateInternal::host(get_engine.clone(), &session, config.keyexpr_prefix.clone(), &id)
+            // Clone the Arc so we can move it into the closure
+            let engine_factory = Arc::clone(&get_engine);
+            NodeStateInternal::host(
+                move |input_rx, output_tx| engine_factory(input_rx, output_tx),
+                &session,
+                config.keyexpr_prefix.clone(),
+                &id
+            )
                 .await?
         } else {
             NodeStateInternal::searching()

@@ -1,8 +1,10 @@
 /// SearchingHost state implementation
+use std::sync::Arc;
+
 use super::config::NodeConfig;
 use crate::error::Result;
 use crate::network::HostQuerier;
-use super::game_engine::GameEngine;
+use super::game_engine::{EngineFactory, GameEngine};
 use super::node::NodeCommand;
 use super::types::{NodeId, NodeStateInternal};
 use rand::Rng;
@@ -22,11 +24,11 @@ impl SearchingHostState {
         config: &NodeConfig,
         node_id: &NodeId,
         command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-        get_engine: &F,
+        get_engine: &Arc<F>,
     ) -> Result<NodeStateInternal<E>>
     where
         E: GameEngine,
-        F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone,
+        F: EngineFactory<E>,
     {
         tracing::info!("Node '{}' searching for hosts...", node_id);
 
@@ -111,8 +113,10 @@ impl SearchingHostState {
             Ok(next_state)
         } else {
             // Transition to Host state
+            // Clone the Arc so we can move it into the closure
+            let engine_factory = Arc::clone(get_engine);
             let next_state = NodeStateInternal::host(
-                get_engine.clone(),
+                move |input_rx, output_tx| engine_factory(input_rx, output_tx),
                 session,
                 config.keyexpr_prefix.clone(),
                 node_id,

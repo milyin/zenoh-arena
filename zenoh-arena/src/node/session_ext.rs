@@ -1,7 +1,7 @@
 use zenoh::{Resolvable, key_expr::KeyExpr};
 use crate::error::Result;
 
-use crate::node::{config::NodeConfig, game_engine::GameEngine, node::Node, types::NodeId};
+use crate::node::{config::NodeConfig, game_engine::{EngineFactory, GameEngine}, node::Node, types::NodeId};
 
 /// Extension trait for zenoh::Session to declare arena nodes
 /// Extension trait for zenoh::Session to add arena node declaration
@@ -34,14 +34,14 @@ pub trait SessionExt {
     fn declare_arena_node<E, F>(&self, get_engine: F) -> NodeBuilder<'_, E, F>
     where
         E: GameEngine,
-        F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone;
+        F: EngineFactory<E>;
 }
 
 impl SessionExt for zenoh::Session {
     fn declare_arena_node<E, F>(&self, get_engine: F) -> NodeBuilder<'_, E, F>
     where
         E: GameEngine,
-        F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone,
+        F: EngineFactory<E>,
     {
         NodeBuilder::new(self, get_engine)
     }
@@ -51,14 +51,14 @@ impl SessionExt for zenoh::Session {
 ///
 /// Allows configuring the node before creating it, similar to zenoh's builder pattern.
 #[must_use = "Resolvables do nothing unless you resolve them using `.await` or `zenoh::Wait::wait`"]
-pub struct NodeBuilder<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> {
+pub struct NodeBuilder<'a, E: GameEngine, F: EngineFactory<E>> {
     session: &'a zenoh::Session,
     get_engine: F,
     config: NodeConfig,
     _phantom: std::marker::PhantomData<E>,
 }
 
-impl<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> NodeBuilder<'a, E, F> {
+impl<'a, E: GameEngine, F: EngineFactory<E>> NodeBuilder<'a, E, F> {
     /// Create a new NodeBuilder
     fn new(session: &'a zenoh::Session, get_engine: F) -> Self {
         Self {
@@ -111,11 +111,11 @@ impl<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sende
     }
 }
 
-impl<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone> Resolvable for NodeBuilder<'a, E, F> {
+impl<'a, E: GameEngine, F: EngineFactory<E>> Resolvable for NodeBuilder<'a, E, F> {
     type To = Result<Node<E, F>>;
 }
 
-impl<'a, E: GameEngine, F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Clone + Send + 'a> std::future::IntoFuture
+impl<'a, E: GameEngine, F: EngineFactory<E> + Send + 'a> std::future::IntoFuture
     for NodeBuilder<'a, E, F>
 {
     type Output = <Self as Resolvable>::To;
