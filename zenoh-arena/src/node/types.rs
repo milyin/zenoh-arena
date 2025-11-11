@@ -154,7 +154,8 @@ where
     E: GameEngine,
 {
     /// Searching for available hosts
-    SearchingHost,
+    /// Carries optional initial state to use when becoming host
+    SearchingHost(crate::node::searching_host_state::SearchingHostState<E>),
 
     /// Connected as client to a host
     Client(ClientState<E>),
@@ -172,7 +173,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NodeStateInternal::SearchingHost => f.debug_tuple("SearchingHost").finish(),
+            NodeStateInternal::SearchingHost(_) => f.debug_tuple("SearchingHost").finish(),
             NodeStateInternal::Client(client_state) => {
                 f.debug_struct("Client")
                     .field("host_id", &client_state.host_id)
@@ -195,8 +196,11 @@ where
     /// Transition to SearchingHost state from any state
     ///
     /// Drops the current state (including engine and liveliness token if in Host mode)
-    pub fn searching() -> Self {
-        NodeStateInternal::SearchingHost
+    /// Optionally preserves game state to use when becoming host
+    pub fn searching(initial_state: Option<E::State>) -> Self {
+        NodeStateInternal::SearchingHost(crate::node::searching_host_state::SearchingHostState {
+            initial_state,
+        })
     }
 
     /// Create a new Host state
@@ -207,6 +211,7 @@ where
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
+        initial_state: Option<E::State>,
     ) -> Result<Self>
     where
         E: GameEngine,
@@ -218,8 +223,8 @@ where
         let (input_tx, input_rx) = flume::unbounded();
         let (output_tx, output_rx) = flume::unbounded();
 
-        // Create engine with the channels (engine receives input_rx and output_tx)
-        let engine = get_engine(input_rx, output_tx);
+        // Create engine with the channels and optional initial state
+        let engine = get_engine(input_rx, output_tx, initial_state);
 
         // Create host liveliness token for discovery
         let token =
@@ -316,7 +321,7 @@ where
 {
     fn from(internal: &NodeStateInternal<E>) -> Self {
         match internal {
-            NodeStateInternal::SearchingHost => NodeState::SearchingHost,
+            NodeStateInternal::SearchingHost(_) => NodeState::SearchingHost,
             NodeStateInternal::Client(client_state) => NodeState::Client {
                 host_id: client_state.host_id.clone(),
                 game_state: client_state.game_state.clone(),

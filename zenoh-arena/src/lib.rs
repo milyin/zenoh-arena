@@ -27,7 +27,11 @@
 //! struct MyEngine;
 //! 
 //! impl MyEngine {
-//!     fn new(input_rx: flume::Receiver<(NodeId, String)>, output_tx: flume::Sender<String>) -> Self {
+//!     fn new(
+//!         input_rx: flume::Receiver<(NodeId, String)>,
+//!         output_tx: flume::Sender<String>,
+//!         _initial_state: Option<String>,
+//!     ) -> Self {
 //!         // Spawn a task to process actions
 //!         std::thread::spawn(move || {
 //!             while let Ok((_node_id, action)) = input_rx.recv() {
@@ -56,7 +60,7 @@
 //!     
 //!     // Declare an arena node using the extension trait
 //!     let node = session
-//!         .declare_arena_node(|input_rx, output_tx| MyEngine::new(input_rx, output_tx))
+//!         .declare_arena_node(MyEngine::new)
 //!         .name("my_node".to_string())
 //!         .unwrap()
 //!         .force_host(true)

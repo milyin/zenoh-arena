@@ -35,8 +35,12 @@ impl std::fmt::Display for BonjourState {
 pub struct BonjourEngine;
 
 impl BonjourEngine {
-    pub fn new(input_rx: flume::Receiver<(NodeId, BonjourAction)>, output_tx: flume::Sender<BonjourState>) -> Self {
-        let mut state = BonjourState::new();
+    pub fn new(
+        input_rx: flume::Receiver<(NodeId, BonjourAction)>,
+        output_tx: flume::Sender<BonjourState>,
+        initial_state: Option<BonjourState>,
+    ) -> Self {
+        let mut state = initial_state.unwrap_or_default();
         
         // Spawn a task to process actions
         std::thread::spawn(move || {
@@ -111,8 +115,8 @@ mod tests {
         let (input_tx, input_rx) = flume::unbounded();
         let (output_tx, output_rx) = flume::unbounded();
         
-        // Create engine
-        let _engine = BonjourEngine::new(input_rx, output_tx);
+        // Create engine with no initial state
+        let _engine = BonjourEngine::new(input_rx, output_tx, None);
         
         // Send first Bonjour action
         input_tx.send((NodeId::generate(), BonjourAction::Bonjour)).unwrap();
@@ -131,8 +135,8 @@ mod tests {
         let (input_tx, input_rx) = flume::unbounded();
         let (output_tx, output_rx) = flume::unbounded();
         
-        // Create engine
-        let _engine = BonjourEngine::new(input_rx, output_tx);
+        // Create engine with no initial state
+        let _engine = BonjourEngine::new(input_rx, output_tx, None);
         
         // Send Bonsoir action
         input_tx.send((NodeId::generate(), BonjourAction::Bonsoir)).unwrap();
@@ -151,8 +155,8 @@ mod tests {
         let (input_tx, input_rx) = flume::unbounded();
         let (output_tx, output_rx) = flume::unbounded();
         
-        // Create engine
-        let _engine = BonjourEngine::new(input_rx, output_tx);
+        // Create engine with no initial state
+        let _engine = BonjourEngine::new(input_rx, output_tx, None);
         
         // Bonjour +1
         input_tx.send((NodeId::generate(), BonjourAction::Bonjour)).unwrap();

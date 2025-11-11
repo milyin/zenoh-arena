@@ -60,14 +60,14 @@ where
                 disconnect_result = self.liveliness_watch.disconnected() => {
                     match disconnect_result {
                         Ok(disconnected_id) => {
-                            tracing::info!("Node '{}' detected host '{}' disconnection, returning to search", node_id, disconnected_id);
-                            // Transition back to SearchingHost
-                            return Ok(NodeStateInternal::SearchingHost);
+                            tracing::info!("Node '{}' detected host '{}' disconnection, returning to search with preserved state", node_id, disconnected_id);
+                            // Transition back to SearchingHost, preserving the current game state
+                            return Ok(NodeStateInternal::searching(self.game_state));
                         }
                         Err(e) => {
                             tracing::warn!("Node '{}' liveliness error: {}", node_id, e);
-                            // Treat error as disconnect
-                            return Ok(NodeStateInternal::SearchingHost);
+                            // Treat error as disconnect, preserve game state
+                            return Ok(NodeStateInternal::searching(self.game_state));
                         }
                     }
                 }

@@ -1,6 +1,4 @@
 /// SearchingHost state implementation
-use std::sync::Arc;
-
 use super::config::NodeConfig;
 use crate::error::Result;
 use crate::network::HostQuerier;
@@ -10,15 +8,19 @@ use super::types::{NodeId, NodeStateInternal};
 use rand::Rng;
 
 /// State while searching for available hosts
-pub(crate) struct SearchingHostState;
+pub(crate) struct SearchingHostState<E: GameEngine> {
+    /// Optional initial state to use when becoming host
+    /// This is preserved from a previous client session if the client lost its host
+    pub(crate) initial_state: Option<E::State>,
+}
 
-impl SearchingHostState {
+impl<E: GameEngine> SearchingHostState<E> {
     /// Process the SearchingHost state - search for available hosts and attempt to connect
     ///
     /// Consumes self and returns the next state.
     /// Uses HostQuerier to find and connect to available hosts. If timeout expires or
     /// no hosts are available/accept connection, transitions to Host state.
-    pub(crate) async fn step<E, F>(
+    pub(crate) async fn step<F>(
         self,
         session: &zenoh::Session,
         config: &NodeConfig,
@@ -27,7 +29,6 @@ impl SearchingHostState {
         get_engine: &F,
     ) -> Result<NodeStateInternal<E>>
     where
-        E: GameEngine,
         F: EngineFactory<E>,
     {
         tracing::info!("Node '{}' searching for hosts...", node_id);
@@ -112,12 +113,13 @@ impl SearchingHostState {
             .await?;
             Ok(next_state)
         } else {
-            // Transition to Host state
+            // Transition to Host state with the preserved initial state
             let next_state = NodeStateInternal::host(
-                &*get_engine,
+                get_engine,
                 session,
                 config.keyexpr_prefix.clone(),
                 node_id,
+                self.initial_state,
             )
             .await?;
             Ok(next_state)

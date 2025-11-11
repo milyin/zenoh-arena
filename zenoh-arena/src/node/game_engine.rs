@@ -19,6 +19,7 @@ pub trait GameEngine: Send + Sync {
 /// This function creates a game engine instance given:
 /// - A receiver for actions from clients (with their NodeId)
 /// - A sender for broadcasting state updates to clients
+/// - An optional initial state to restore the engine to a previous state
 ///
 /// The factory function should spawn any necessary background tasks for processing
 /// actions and generating state updates.
@@ -31,19 +32,21 @@ pub trait GameEngine: Send + Sync {
 /// ```ignore
 /// fn create_engine(
 ///     input_rx: flume::Receiver<(NodeId, Action)>,
-///     output_tx: flume::Sender<State>
+///     output_tx: flume::Sender<State>,
+///     initial_state: Option<State>
 /// ) -> MyEngine {
-///     // Create and return engine
+///     // Create and return engine, optionally initializing with the provided state
 /// }
 /// ```
 pub trait EngineFactory<E: GameEngine>: Fn(
     flume::Receiver<(NodeId, E::Action)>,
-    flume::Sender<E::State>
+    flume::Sender<E::State>,
+    Option<E::State>
 ) -> E + Send + Sync {}
 
 // Blanket implementation for all types that satisfy the trait bounds
 impl<E, F> EngineFactory<E> for F
 where
     E: GameEngine,
-    F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>) -> E + Send + Sync,
+    F: Fn(flume::Receiver<(NodeId, E::Action)>, flume::Sender<E::State>, Option<E::State>) -> E + Send + Sync,
 {}

@@ -6,7 +6,6 @@ use super::game_engine::{EngineFactory, GameEngine};
 use crate::error::{ArenaError, Result};
 use crate::network::NodeLivelinessToken;
 use crate::network::keyexpr::NodeType;
-use crate::node::searching_host_state::SearchingHostState;
 use super::types::{NodeId, NodeState, NodeStateInternal};
 
 /// Commands that can be sent to the node
@@ -80,16 +79,18 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
         let state = if config.force_host {
             tracing::info!("Node '{}' forced to host mode", id);
 
-            // Use the constructor function to create host state
+            // Use the constructor function to create host state with no initial state
             NodeStateInternal::host(
                 &*get_engine,
                 &session,
                 config.keyexpr_prefix.clone(),
-                &id
+                &id,
+                None, // No initial state when force starting as host
             )
                 .await?
         } else {
-            NodeStateInternal::searching()
+            // Start in searching state with no initial state
+            NodeStateInternal::searching(None)
         };
 
         let node = Self {
@@ -139,9 +140,8 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
         }
 
         // Dispatch based on current state using state-specific run methods
-        let next_result = match std::mem::replace(&mut self.state, NodeStateInternal::SearchingHost) {
-            NodeStateInternal::SearchingHost => {
-                let searching_state = SearchingHostState;
+        let next_result = match std::mem::replace(&mut self.state, NodeStateInternal::searching(None)) {
+            NodeStateInternal::SearchingHost(searching_state) => {
                 searching_state
                     .step(
                         &self.session,
@@ -258,7 +258,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
+        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
 
         let result = session.declare_arena_node(get_engine).await;
         assert!(result.is_ok());
@@ -270,7 +270,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_custom_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
+        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
 
         let result = session
             .declare_arena_node(get_engine)
@@ -286,7 +286,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_invalid_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
+        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
 
         let builder_result = session
             .declare_arena_node(get_engine)
@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_step_with_force_host() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
+        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
 
         let mut node = session
             .declare_arena_node(get_engine)
@@ -330,7 +330,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_force_host_starts_in_host_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
+        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
 
         let node = session
             .declare_arena_node(get_engine)
@@ -344,17 +344,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
+        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
 
         let node = session.declare_arena_node(get_engine).await.unwrap();
         // Node should be in SearchingHost state by default
-        assert!(matches!(node.state, NodeStateInternal::SearchingHost));
+        assert!(matches!(node.state, NodeStateInternal::SearchingHost(_)));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |input_rx, output_tx| TestEngine::new(input_rx, output_tx);
+        let get_engine = |input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx);
 
         let mut node = session
             .declare_arena_node(get_engine)
@@ -401,7 +401,7 @@ mod tests {
 
         // Use the extension trait to declare a node (name must be called first)
         let node = session
-            .declare_arena_node(|input_rx, output_tx| TestEngine::new(input_rx, output_tx))
+            .declare_arena_node(|input_rx, output_tx, _initial_state| TestEngine::new(input_rx, output_tx))
             .name("test_node".to_string())
             .unwrap()
             .force_host(true)
@@ -418,9 +418,5 @@ mod tests {
             .send_async(NodeCommand::GameAction(42))
             .await
             .unwrap();
-
-        // Drop the node and sender
-        drop(sender);
-        drop(node);
     }
 }

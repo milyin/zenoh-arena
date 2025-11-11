@@ -14,7 +14,11 @@ pub trait SessionExt {
     ///
     /// # struct MyEngine;
     /// # impl MyEngine {
-    /// #     fn new(input_rx: flume::Receiver<(NodeId, String)>, output_tx: flume::Sender<String>) -> Self {
+    /// #     fn new(
+    /// #         input_rx: flume::Receiver<(NodeId, String)>,
+    /// #         output_tx: flume::Sender<String>,
+    /// #         _initial_state: Option<String>,
+    /// #     ) -> Self {
     /// #         Self
     /// #     }
     /// # }
@@ -26,7 +30,7 @@ pub trait SessionExt {
     /// # async fn example() {
     /// let session = zenoh::open(zenoh::Config::default()).await.unwrap();
     /// let node = session
-    ///     .declare_arena_node(|input_rx, output_tx| MyEngine::new(input_rx, output_tx))
+    ///     .declare_arena_node(MyEngine::new)
     ///     .await
     ///     .unwrap();
     /// # }
