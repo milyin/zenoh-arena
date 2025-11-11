@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use zenoh::key_expr::KeyExpr;
 
-use crate::network::{HostQueryable, KeyexprClient, KeyexprHost, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher};
+use crate::network::{HostQueryable, KeyexprClient, KeyexprHost, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
 use crate::node::client_state::ClientState;
 use crate::error::{ArenaError, Result};
 use crate::node::host_state::HostState;
@@ -265,12 +265,16 @@ where
         // Create multinode liveliness watch for monitoring connected clients
         let client_liveliness_watch = NodeLivelinessWatch::<KeyexprClient>::new();
 
+        // Create action subscriber to receive actions from clients
+        let action_subscriber = NodeSubscriber::new(session, prefix.clone(), node_id).await?;
+
         *self = NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
             engine,
             _liveliness_token: Some(token),
             queryable: Some(Arc::new(queryable)),
             client_liveliness_watch,
+            action_subscriber,
             game_state: None,
         });
 

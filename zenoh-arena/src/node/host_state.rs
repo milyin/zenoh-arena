@@ -1,7 +1,7 @@
 /// Host state implementation
 use std::sync::Arc;
 
-use crate::{network::{host_queryable::HostRequest, KeyexprClient}, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
+use crate::{network::{host_queryable::HostRequest, KeyexprClient, NodeSubscriber}, node::{config::NodeConfig, node::{GameEngine, NodeCommand}, types::{NodeId, NodeStateInternal}}};
 use crate::error::Result;
 
 /// State while acting as a host
@@ -19,6 +19,8 @@ where
     pub(crate) queryable: Option<Arc<crate::network::HostQueryable>>,
     /// Multinode liveliness watch to detect any client disconnect
     pub(crate) client_liveliness_watch: crate::network::NodeLivelinessWatch<KeyexprClient>,
+    /// Subscriber to receive actions from clients
+    pub(crate) action_subscriber: NodeSubscriber<E::Action>,
     /// Current game state from the engine
     pub(crate) game_state: Option<E::State>,
 }
@@ -73,6 +75,30 @@ where
                     }
                 }
                 true
+            }
+            // Action received from a client
+            action_result = self.action_subscriber.recv() => {
+                match action_result {
+                    Ok((sender_id, action)) => {
+                        tracing::debug!(
+                            "Node '{}' received action from client '{}'",
+                            node_id,
+                            sender_id
+                        );
+                        // Process action through the engine
+                        let new_game_state = self.engine.process_action(action, &sender_id)?;
+                        self.game_state = Some(new_game_state);
+                        false
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Node '{}' failed to receive action: {}",
+                            node_id,
+                            e
+                        );
+                        true
+                    }
+                }
             }
             // Command received
             result = command_rx.recv_async() => match result {

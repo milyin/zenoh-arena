@@ -295,67 +295,67 @@ mod tests {
     #[test]
     fn test_link_keyexpr_creation() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let sender = NodeId::from_name("host1".to_string()).unwrap();
-        let receiver = NodeId::from_name("client1".to_string()).unwrap();
+        let receiver = NodeId::from_name("host1".to_string()).unwrap();
+        let sender = NodeId::from_name("client1".to_string()).unwrap();
 
         let link_keyexpr = KeyexprLink::new(
             prefix,
-            Some(sender.clone()),
             Some(receiver.clone()),
+            Some(sender.clone()),
         );
-        assert_eq!(link_keyexpr.sender_id(), &Some(sender));
         assert_eq!(link_keyexpr.receiver_id(), &Some(receiver));
+        assert_eq!(link_keyexpr.sender_id(), &Some(sender));
         assert_eq!(link_keyexpr.prefix().as_str(), "arena/game1");
     }
 
     #[test]
     fn test_link_keyexpr_roundtrip() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let sender = NodeId::from_name("host1".to_string()).unwrap();
-        let receiver = NodeId::from_name("client1".to_string()).unwrap();
+        let receiver = NodeId::from_name("host1".to_string()).unwrap();
+        let sender = NodeId::from_name("client1".to_string()).unwrap();
 
         let link_keyexpr = KeyexprLink::new(
             prefix,
-            Some(sender.clone()),
             Some(receiver.clone()),
+            Some(sender.clone()),
         );
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/client1");
 
         let parsed = KeyexprLink::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.sender_id(), &Some(sender));
         assert_eq!(parsed.receiver_id(), &Some(receiver));
+        assert_eq!(parsed.sender_id(), &Some(sender));
     }
 
     #[test]
     fn test_link_keyexpr_wildcard_remote() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let sender = NodeId::from_name("host1".to_string()).unwrap();
+        let receiver = NodeId::from_name("host1".to_string()).unwrap();
 
-        let link_keyexpr = KeyexprLink::new(prefix, Some(sender.clone()), None);
+        let link_keyexpr = KeyexprLink::new(prefix, Some(receiver.clone()), None);
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/host1/*");
 
         let parsed = KeyexprLink::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.sender_id(), &Some(sender));
-        assert_eq!(parsed.receiver_id(), &None);
+        assert_eq!(parsed.receiver_id(), &Some(receiver));
+        assert_eq!(parsed.sender_id(), &None);
     }
 
     #[test]
     fn test_link_keyexpr_wildcard_own() {
         let prefix = KeyExpr::try_from("arena/game1").unwrap();
-        let receiver = NodeId::from_name("client1".to_string()).unwrap();
+        let sender = NodeId::from_name("client1".to_string()).unwrap();
 
-        let link_keyexpr = KeyexprLink::new(prefix, None, Some(receiver.clone()));
+        let link_keyexpr = KeyexprLink::new(prefix, None, Some(sender.clone()));
         let keyexpr: KeyExpr = link_keyexpr.into();
 
         assert_eq!(keyexpr.as_str(), "arena/game1/link/*/client1");
 
         let parsed = KeyexprLink::try_from(keyexpr).unwrap();
-        assert_eq!(parsed.sender_id(), &None);
-        assert_eq!(parsed.receiver_id(), &Some(receiver));
+        assert_eq!(parsed.receiver_id(), &None);
+        assert_eq!(parsed.sender_id(), &Some(sender));
     }
 
     #[test]
