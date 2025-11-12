@@ -549,6 +549,11 @@ impl Tetris {
 
     // Process single user action
     pub fn step(&mut self) -> StepResult {
+        // Don't process anything if name is not set (waiting for player)
+        if self.name.is_none() {
+            return StepResult::None;
+        }
+        
         if self.game_over {
             return StepResult::GameOver;
         }
