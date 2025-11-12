@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Declare node with configured parameters
     let mut node_builder = session
         .declare_arena_node(BonjourEngine::new)
-        .step_timeout_break_ms(10000)
+        .step_timeout_break_ms(3000)
         .force_host(args.force_host);
 
     // Apply name if provided
@@ -137,13 +137,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             }
             StepResult::RoleChanged(role) => {
-                println!("[Role: {:?}] State: {} | Node: {}", role, node.state(), node.id());
+                println!("{}: role changed to {:?}", node.id(), role);
             }
             StepResult::GameState(state) => {
-                println!("[Game: {}] State: {} | Node: {}", state, node.state(), node.id());
+                println!("{}: new game state {}", node.id(), state);
             }
             StepResult::Timeout => {
-                println!("[Status] State: {} | Node: {}", node.state(), node.id());
+                println!("{}: {} {}", node.id(), node.state(), node.game_state().unwrap_or_default());
             }
         }
     }
