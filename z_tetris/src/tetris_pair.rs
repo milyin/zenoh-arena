@@ -90,6 +90,13 @@ impl TetrisPair {
         }
     }
 
+    pub fn set_player_name(&mut self, player: PlayerSide, name: Option<String>) {
+        match player {
+            PlayerSide::Player => self.player.set_name(name),
+            PlayerSide::Opponent => self.opponent.set_name(name),
+        }
+    }
+
     pub fn is_game_over(&self) -> bool {
         self.player.is_game_over() || self.opponent.is_game_over()
     }

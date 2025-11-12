@@ -30,6 +30,9 @@ impl TetrisEngine {
             tetris_pair.set_drop_speed(1, 1);
             tetris_pair.set_line_remove_speed(3, 5);
             
+            // Set player name initially
+            tetris_pair.set_player_name(PlayerSide::Player, Some(host_id.to_string()));
+            
             let mut opponent_id: Option<NodeId> = None;
             loop {
                 let start = time::Instant::now();
@@ -40,7 +43,10 @@ impl TetrisEngine {
                     let player_side = if client_id == host_id {
                         PlayerSide::Player
                     } else {
-                        opponent_id = Some(client_id);
+                        if opponent_id.is_none() {
+                            tetris_pair.set_player_name(PlayerSide::Opponent, Some(client_id.to_string()));
+                            opponent_id = Some(client_id);
+                        }
                         PlayerSide::Opponent
                     };
 
@@ -50,9 +56,7 @@ impl TetrisEngine {
                 
                 // Perform game step and send state only if something changed
                 if tetris_pair.step() != (StepResult::None, StepResult::None) {
-                    let mut state = tetris_pair.get_state();
-                    state.player.name = Some(host_id.to_string());
-                    state.opponent.name = opponent_id.as_ref().map(|id| id.to_string());
+                    let state = tetris_pair.get_state();
                     let _ = output_tx.send(state);
                 }
                 

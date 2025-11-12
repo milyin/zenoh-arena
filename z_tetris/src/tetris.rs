@@ -443,6 +443,8 @@ pub struct Tetris {
     rows: usize,
     // Game over flag
     game_over: bool,
+    // Player name
+    name: Option<String>,
     // Game field
     well: Field,
     // Preview field
@@ -493,6 +495,7 @@ impl Tetris {
             cols,
             rows,
             game_over,
+            name: None,
             well,
             preview,
             current: None,
@@ -527,8 +530,20 @@ impl Tetris {
         self.rows
     }
 
+    pub fn set_name(&mut self, name: Option<String>) {
+        self.name = name;
+    }
+
+    pub fn name(&self) -> Option<&String> {
+        self.name.as_ref()
+    }
+
     // Add user action to actions queue
     pub fn add_action(&mut self, action: Action) {
+        // Ignore actions if name is None (waiting for player)
+        if self.name.is_none() {
+            return;
+        }
         self.actions.push_back(action);
     }
 
@@ -796,7 +811,7 @@ impl Tetris {
             well,
             preview,
             game_over: self.game_over,
-            name: None,
+            name: self.name.clone(),
         }
     }
 
