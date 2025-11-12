@@ -75,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Controls:");
     println!("  ← → - Move left/right");
     println!("  ↓ - Move down");
-    println!("  z/x - Rotate left/right");
+    println!("  ↑ z/x - Rotate left/right");
     println!("  Space - Drop");
     println!("  q - Quit");
     println!();
@@ -93,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Key::ArrowLeft => Some(Action::MoveLeft),
                     Key::ArrowRight => Some(Action::MoveRight),
                     Key::ArrowDown => Some(Action::MoveDown),
+                    Key::ArrowUp => Some(Action::RotateRight),
                     Key::Char('z') | Key::Char('Z') => Some(Action::RotateLeft),
                     Key::Char('x') | Key::Char('X') => Some(Action::RotateRight),
                     Key::Char(' ') => Some(Action::Drop),
