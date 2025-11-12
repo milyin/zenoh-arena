@@ -82,7 +82,7 @@ impl GameEngine for TetrisEngine {
     type State = TetrisPairState;
 
     fn max_clients(&self) -> Option<usize> {
-        Some(2)
+        Some(1)
     }
 }
 
