@@ -796,6 +796,7 @@ impl Tetris {
             well,
             preview,
             game_over: self.game_over,
+            name: None,
         }
     }
 

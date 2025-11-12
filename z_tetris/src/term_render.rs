@@ -163,18 +163,31 @@ impl TermRender for Field {
 pub struct WellField {
     field: Field,
     game_over: bool,
+    player_name: Option<String>,
 }
 
 impl WellField {
     pub fn new(field: Field, game_over: bool) -> Self {
-        Self { field, game_over }
+        Self { field, game_over, player_name: Some(String::new()) }
+    }
+    
+    pub fn new_with_player(field: Field, game_over: bool, player_name: Option<String>) -> Self {
+        Self { field, game_over, player_name }
     }
 }
 
 impl TermRender for WellField {
     fn output(&self, style: &impl TermStyle) -> Vec<Vec<TermCell>> {
         let mut lines = self.field.output(style);
-        if self.game_over {
+        if self.player_name.is_none() {
+            // Find middle line of the field
+            let middle = lines.len() / 2;
+            // Replace line with message
+            let message = TermCell::Message("      Waiting...".to_string());
+            lines[middle] = vec![message];
+            // Add padding
+            pad_block_right(&mut lines, style);
+        } else if self.game_over {
             // Find middle line of the field
             let middle = lines.len() / 2;
             // Replace line with message
@@ -233,14 +246,13 @@ impl TermRender for PreviewField {
 pub struct GameFieldLeft {
     well: WellField,
     preview: PreviewField,
-    text: Vec<String>,
 }
 
 impl GameFieldLeft {
-    fn new(state: TetrisState, text: Vec<String>) -> Self {
-        let well = WellField::new(state.well, state.game_over);
+    fn new(state: TetrisState, player_name: Option<String>) -> Self {
+        let well = WellField::new_with_player(state.well, state.game_over, player_name.clone());
         let preview = PreviewField(state.preview);
-        Self { well, preview, text }
+        Self { well, preview }
     }
 }
 
@@ -250,7 +262,9 @@ impl TermRender for GameFieldLeft {
         let mut preview_block = self.preview.output(style);
         // Append empty line and player name after preview block
         preview_block.push(Vec::new());
-        preview_block.extend(self.text.iter().map(|s| vec![TermCell::Message(s.clone())]));
+        if let Some(ref name) = self.well.player_name {
+            preview_block.push(vec![TermCell::Message(name.clone())]);
+        }
         // Append preview lines to well lines, padding with TermCell::Space
         // Preview is always shorter than well
         for (well_line, mut preview_line) in lines.iter_mut().zip(preview_block.into_iter()) {
@@ -265,14 +279,13 @@ impl TermRender for GameFieldLeft {
 pub struct GameFieldRight {
     well: WellField,
     preview: PreviewField,
-    text: Vec<String>,
 }
 
 impl GameFieldRight {
-    fn new(state: TetrisState, text: Vec<String>) -> Self {
-        let well = WellField::new(state.well, state.game_over);
+    fn new(state: TetrisState, player_name: Option<String>) -> Self {
+        let well = WellField::new_with_player(state.well, state.game_over, player_name.clone());
         let preview = PreviewField(state.preview);
-        Self { well, preview, text }
+        Self { well, preview }
     }
 }
 
@@ -282,7 +295,9 @@ impl TermRender for GameFieldRight {
         let well_block = self.well.output(style);
         // Append empty line and text after preview block
         lines.push(Vec::new());
-        lines.extend(self.text.iter().map(|s| vec![TermCell::Message(s.clone())]));
+        if let Some(ref name) = self.well.player_name {
+            lines.push(vec![TermCell::Message(name.clone())]);
+        }
         // extend height of lines to the height of well_block and then pad it with TermCell::Space
         // Preview is always shorter than well
         lines.resize(well_block.len(), Vec::new());
@@ -302,9 +317,9 @@ pub struct GameFieldPair {
 }
 
 impl GameFieldPair {
- pub fn new(state: TetrisPairState, text_player: Vec<String>, text_opponent: Vec<String> ) -> Self {
-        let player = GameFieldRight::new(state.player, text_player);
-        let opponent = GameFieldLeft::new(state.opponent, text_opponent);
+ pub fn new(state: TetrisPairState ) -> Self {
+        let player = GameFieldRight::new(state.player.clone(), state.player.name.clone());
+        let opponent = GameFieldLeft::new(state.opponent.clone(), state.opponent.name.clone());
         Self { opponent, player }
  }
 }

@@ -158,14 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn render_game(term: &Term, state: &TetrisPairState) -> Result<(), Box<dyn std::error::Error>> {
-    let player_name = state.player_id.as_deref().unwrap_or("PLAYER");
-    let opponent_name = state.opponent_id.as_deref().unwrap_or("OPPONENT");
-
-    let field = GameFieldPair::new(
-        state.clone(),
-        vec![player_name.to_string()],
-        vec![opponent_name.to_string()],
-    );
+    let field = GameFieldPair::new(state.clone());
     let lines = field.render(&AnsiTermStyle);
 
     // Clear and render

@@ -51,8 +51,8 @@ impl TetrisEngine {
                 // Perform game step and send state only if something changed
                 if tetris_pair.step() != (StepResult::None, StepResult::None) {
                     let mut state = tetris_pair.get_state();
-                    state.player_id = Some(host_id.to_string());
-                    state.opponent_id = opponent_id.as_ref().map(|id| id.to_string());
+                    state.player.name = Some(host_id.to_string());
+                    state.opponent.name = opponent_id.as_ref().map(|id| id.to_string());
                     let _ = output_tx.send(state);
                 }
                 
