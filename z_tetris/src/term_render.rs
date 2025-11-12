@@ -101,7 +101,7 @@ impl TermStyle for PlainTermStyle {
             | TermCell::BorderBottomLeft
             | TermCell::BorderBottomRight => 1,
             TermCell::Space => 1,
-            TermCell::Message(s) => s.len(),
+            TermCell::Message(s) => s.chars().count(),
         }
     }
 }
@@ -140,7 +140,7 @@ impl TermStyle for AnsiTermStyle {
             | TermCell::BorderBottomLeft
             | TermCell::BorderBottomRight => 1,
             TermCell::Space => 1,
-            TermCell::Message(s) => s.len(),
+            TermCell::Message(s) => s.chars().count(),
         }
     }
 }
@@ -312,9 +312,9 @@ impl TermRender for GameFieldPair {
             player_well_lines[0].iter().map(|c| style.width(c)).sum()
         };
 
-        // Calculate max message width
+        // Calculate max message width (in characters, not bytes)
         let max_message_width = self.message.iter()
-            .map(|m| m.len())
+            .map(|m| m.chars().count())
             .max()
             .unwrap_or(0);
 
@@ -326,7 +326,8 @@ impl TermRender for GameFieldPair {
         // Middle section width: opponent_preview + 2 spaces + player_preview
         let middle_section_width = opponent_preview_width + 2 + player_preview_width;
         // Ensure message width is at least as wide as the middle section
-        let message_section_width = middle_section_width.max(max_message_width);
+        // Add 1 for the space before the message
+        let message_section_width = middle_section_width.max(max_message_width + 1);
 
         // Generate all lines
         for i in 0..total_lines {
@@ -375,24 +376,35 @@ impl TermRender for GameFieldPair {
                     line.push(TermCell::Space);
                 }
             } else {
-                // Show message
-                line.push(TermCell::Space);
-                
+                // Show message - ensure we always output exactly message_section_width character widths
                 let message_idx = i - preview_len;
                 if message_idx < self.message.len() {
                     let msg = &self.message[message_idx];
-                    line.push(TermCell::Message(msg.clone()));
-                    let padding = message_section_width - 2 - msg.len();
-                    for _ in 0..padding {
+                    let msg_char_count = msg.chars().count();
+                    
+                    // Calculate how many chars we can fit: message_section_width - 1 (for leading space)
+                    let max_msg_chars = message_section_width.saturating_sub(1);
+                    let msg_to_show = if msg_char_count > max_msg_chars {
+                        msg.chars().take(max_msg_chars).collect::<String>()
+                    } else {
+                        msg.clone()
+                    };
+                    let msg_to_show_len = msg_to_show.chars().count();
+                    
+                    line.push(TermCell::Space);
+                    line.push(TermCell::Message(msg_to_show));
+                    
+                    // Pad the rest
+                    let used = 1 + msg_to_show_len;
+                    for _ in used..message_section_width {
                         line.push(TermCell::Space);
                     }
                 } else {
-                    // Pad with spaces
-                    for _ in 0..(message_section_width - 2) {
+                    // Pad with spaces for the entire section
+                    for _ in 0..message_section_width {
                         line.push(TermCell::Space);
                     }
                 }
-                line.push(TermCell::Space);
             }
             
             line.push(TermCell::Space);

@@ -1,6 +1,7 @@
 use clap::Parser;
 use console::{Key, Term};
 use std::path::PathBuf;
+use std::vec;
 use z_tetris::engine::{TetrisAction, TetrisEngine};
 use z_tetris::{Action, AnsiTermStyle, GameFieldPair, TermRender, TetrisPairState};
 use zenoh::key_expr::KeyExpr;
@@ -72,12 +73,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref prefix) = args.prefix {
         println!("Prefix: {}", prefix);
     }
-    println!("Controls:");
-    println!("  ← → - Move left/right");
-    println!("  ↓ - Move down");
-    println!("  ↑ z/x - Rotate left/right");
-    println!("  Space - Drop");
-    println!("  q - Quit");
     println!();
 
     // Get command sender for the node
@@ -160,29 +155,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn format_node_state_message(state: &NodeState) -> Vec<String> {
+    // Start with controls help
+    let mut output = vec![
+        "".to_string(),
+        "← → ↓ - Move".to_string(),
+        "↑ z/x - Rotate".to_string(),
+        "Space - Drop".to_string(),
+        "q - Quit".to_string(),
+        "".to_string(),
+    ];
+    
+    // Add node state info
     match state {
-        NodeState::SearchingHost => vec![
-            "State: Searching Host".to_string(),
-        ],
-        NodeState::Client { host_id } => vec![
-            "State: Client".to_string(),
-            format!("Host ID: {}", host_id),
-        ],
-        NodeState::Host { is_accepting, connected_clients } => {
-            let mut msg = vec![
-                "State: Host".to_string(),
-                format!("Accepting: {}", if *is_accepting { "Yes" } else { "No" }),
-                format!("Clients: {}", connected_clients.len()),
-            ];
-            for client_id in connected_clients {
-                msg.push(format!("  - {}", client_id));
-            }
-            msg
+        NodeState::SearchingHost => {
+            output.push("State: Searching Host".to_string());
         },
-        NodeState::Stop => vec![
-            "State: Stopped".to_string(),
-        ],
+        NodeState::Client { host_id } => {
+            output.push("State: Client".to_string());
+            output.push(format!("Host ID: {}", host_id));
+        },
+        NodeState::Host { is_accepting, connected_clients } => {
+            output.push("State: Host".to_string());
+            output.push(format!("Accepting: {}", if *is_accepting { "Yes" } else { "No" }));
+            output.push(format!("Clients: {}", connected_clients.len()));
+            for client_id in connected_clients {
+                output.push(format!("  - {}", client_id));
+            }
+        },
+        NodeState::Stop => {
+            output.push("State: Stopped".to_string());
+        },
     }
+    
+    output
 }
 
 fn render_game(term: &Term, state: &TetrisPairState, message: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
