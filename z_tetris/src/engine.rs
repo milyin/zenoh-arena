@@ -30,9 +30,7 @@ impl TetrisEngine {
             tetris_pair.set_drop_speed(1, 1);
             tetris_pair.set_line_remove_speed(3, 5);
             
-            let mut player_id: Option<NodeId> = None;
             let mut opponent_id: Option<NodeId> = None;
-            
             loop {
                 let start = time::Instant::now();
                 
@@ -40,22 +38,10 @@ impl TetrisEngine {
                 while let Ok((client_id, action)) = input_rx.try_recv() {
                     // Determine which player this is based on host_id
                     let player_side = if client_id == host_id {
-                        // Host is always the Player side
-                        if player_id.is_none() {
-                            player_id = Some(client_id.clone());
-                        }
                         PlayerSide::Player
                     } else {
-                        // First non-host client is the Opponent side
-                        if opponent_id.is_none() {
-                            opponent_id = Some(client_id.clone());
-                        }
-                        if opponent_id.as_ref() == Some(&client_id) {
-                            PlayerSide::Opponent
-                        } else {
-                            // Unknown/extra client, skip
-                            continue;
-                        }
+                        opponent_id = Some(client_id);
+                        PlayerSide::Opponent
                     };
 
                     // Add action to the appropriate player
@@ -65,7 +51,7 @@ impl TetrisEngine {
                 // Perform game step and send state only if something changed
                 if tetris_pair.step() != (StepResult::None, StepResult::None) {
                     let mut state = tetris_pair.get_state();
-                    state.player_id = player_id.as_ref().map(|id| id.to_string());
+                    state.player_id = Some(host_id.to_string());
                     state.opponent_id = opponent_id.as_ref().map(|id| id.to_string());
                     let _ = output_tx.send(state);
                 }
