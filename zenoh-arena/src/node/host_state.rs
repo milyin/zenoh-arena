@@ -162,13 +162,15 @@ where
                             StepResult::GameState(new_game_state),
                         ));
                     }
-                    Err(e) => {
-                        tracing::error!(
-                            "Node '{}' engine output channel closed: {}",
-                            node_id,
-                            e
+                    Err(_) => {
+                        tracing::info!(
+                            "Node '{}' engine thread exited (game over)",
+                            node_id
                         );
-                        true
+                        return Ok((
+                            NodeStateInternal::searching(),
+                            StepResult::RoleChanged(crate::NodeRole::SearchingHost),
+                        ));
                     }
                 }
             }

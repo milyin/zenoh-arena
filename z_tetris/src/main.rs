@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn keyboard input task with separate term
     let keyboard_sender = node_sender.clone();
-    let keyboard_task = tokio::task::spawn_blocking(move || {
+    let _keyboard_task = tokio::task::spawn_blocking(move || {
         let input_term = Term::stdout();
         loop {
             if let Ok(key) = input_term.read_key() {
@@ -129,13 +129,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             StepResult::GameState(mut game_state) => {
                 // Game state changed - render it
                 let state = node.node_state();
-                
+
                 // If we're a client, swap player and opponent views
                 if matches!(state, NodeState::Client { .. }) {
                     game_state.swap();
                 }
-                
+
                 render_game(&render_term, &game_state)?;
+
+                // Check if player's game is over
+                if game_state.player.game_over {
+                    break;
+                }
             }
             StepResult::RoleChanged(_) => {
                 // Role changed - later show status, now unused
@@ -146,18 +151,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Wait for keyboard task to finish
-    keyboard_task.abort();
-    let _ = keyboard_task.await;
-
     println!("Game Over!");
-    Ok(())
+
+    // Force exit to avoid waiting on cleanup of blocked keyboard task
+    std::process::exit(0);
 }
 
 fn render_game(term: &Term, state: &TetrisPairState) -> Result<(), Box<dyn std::error::Error>> {
     let player_name = state.player_id.as_deref().unwrap_or("PLAYER");
     let opponent_name = state.opponent_id.as_deref().unwrap_or("OPPONENT");
-    
+
     let field = GameFieldPair::new(
         state.clone(),
         vec![player_name.to_string()],

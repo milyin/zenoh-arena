@@ -56,6 +56,11 @@ impl TetrisEngine {
                     let _ = output_tx.send(state);
                 }
                 
+                // Check for game over and exit thread if game is over
+                if tetris_pair.is_game_over() {
+                    break;
+                }
+                
                 // Maintain consistent timing
                 let elapsed = start.elapsed();
                 if elapsed < step_delay {

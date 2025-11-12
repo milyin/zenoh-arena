@@ -10,6 +10,7 @@ use crate::node::client_state::ClientState;
 use crate::node::game_engine::{EngineFactory, GameEngine};
 use crate::node::host_state::HostState;
 use crate::node::name_generator;
+use crate::node::searching_host_state::SearchingHostState;
 
 /// Unique node identifier
 ///
@@ -157,7 +158,7 @@ where
 {
     /// Searching for available hosts
     /// Carries optional initial state to use when becoming host
-    SearchingHost(crate::node::searching_host_state::SearchingHostState<E>),
+    SearchingHost(SearchingHostState<E>),
 
     /// Connected as client to a host
     Client(ClientState<E>),
@@ -199,7 +200,7 @@ where
     ///
     /// Drops the current state (including engine and liveliness token if in Host mode)
     pub fn searching() -> Self {
-        NodeStateInternal::SearchingHost(crate::node::searching_host_state::SearchingHostState {
+        NodeStateInternal::SearchingHost(SearchingHostState {
             _phantom: std::marker::PhantomData,
         })
     }
