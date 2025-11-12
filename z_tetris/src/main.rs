@@ -136,7 +136,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     game_state.swap();
                 }
 
-                render_game(&render_term, &game_state)?;
+                let message = format_node_state_message(&state);
+                render_game(&render_term, &game_state, message)?;
 
                 // Check if player's game is over
                 if game_state.player.game_over {
@@ -158,8 +159,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::process::exit(0);
 }
 
-fn render_game(term: &Term, state: &TetrisPairState) -> Result<(), Box<dyn std::error::Error>> {
-    let field = GameFieldPair::new(state.clone());
+fn format_node_state_message(state: &NodeState) -> Vec<String> {
+    match state {
+        NodeState::SearchingHost => vec![
+            "State: Searching Host".to_string(),
+        ],
+        NodeState::Client { host_id } => vec![
+            "State: Client".to_string(),
+            format!("Host ID: {}", host_id),
+        ],
+        NodeState::Host { is_accepting, connected_clients } => {
+            let mut msg = vec![
+                "State: Host".to_string(),
+                format!("Accepting: {}", if *is_accepting { "Yes" } else { "No" }),
+                format!("Clients: {}", connected_clients.len()),
+            ];
+            for client_id in connected_clients {
+                msg.push(format!("  - {}", client_id));
+            }
+            msg
+        },
+        NodeState::Stop => vec![
+            "State: Stopped".to_string(),
+        ],
+    }
+}
+
+fn render_game(term: &Term, state: &TetrisPairState, message: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let field = GameFieldPair::new(state.clone(), message);
     let lines = field.render(&AnsiTermStyle);
 
     // Clear and render

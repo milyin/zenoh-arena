@@ -314,13 +314,14 @@ impl TermRender for GameFieldRight {
 pub struct GameFieldPair {
     opponent: GameFieldLeft,
     player: GameFieldRight,
+    message: Vec<String>,
 }
 
 impl GameFieldPair {
- pub fn new(state: TetrisPairState ) -> Self {
+ pub fn new(state: TetrisPairState, message: Vec<String>) -> Self {
         let player = GameFieldRight::new(state.player.clone(), state.player.name.clone());
         let opponent = GameFieldLeft::new(state.opponent.clone(), state.opponent.name.clone());
-        Self { opponent, player }
+        Self { opponent, player, message }
  }
 }
 
