@@ -1,5 +1,5 @@
 use crate::{
-    state::{TetrisPairState, TetrisState},
+    state::TetrisPairState,
     tetris::CellType,
     Field,
 };
@@ -243,100 +243,173 @@ impl TermRender for PreviewField {
     }
 }
 
-pub struct GameFieldLeft {
-    well: WellField,
-    preview: PreviewField,
-}
-
-impl GameFieldLeft {
-    fn new(state: TetrisState, player_name: Option<String>) -> Self {
-        let well = WellField::new_with_player(state.well, state.game_over, player_name.clone());
-        let preview = PreviewField(state.preview);
-        Self { well, preview }
-    }
-}
-
-impl TermRender for GameFieldLeft {
-    fn output(&self, style: &impl TermStyle) -> Vec<Vec<TermCell>> {
-        let mut lines = self.well.output(style);
-        let mut preview_block = self.preview.output(style);
-        // Append empty line and player name after preview block
-        preview_block.push(Vec::new());
-        if let Some(ref name) = self.well.player_name {
-            preview_block.push(vec![TermCell::Message(name.clone())]);
-        }
-        // Append preview lines to well lines, padding with TermCell::Space
-        // Preview is always shorter than well
-        for (well_line, mut preview_line) in lines.iter_mut().zip(preview_block.into_iter()) {
-            well_line.push(TermCell::Space);
-            well_line.append(&mut preview_line);
-        }
-        pad_block_right(&mut lines, style);
-        lines
-    }
-}
-
-pub struct GameFieldRight {
-    well: WellField,
-    preview: PreviewField,
-}
-
-impl GameFieldRight {
-    fn new(state: TetrisState, player_name: Option<String>) -> Self {
-        let well = WellField::new_with_player(state.well, state.game_over, player_name.clone());
-        let preview = PreviewField(state.preview);
-        Self { well, preview }
-    }
-}
-
-impl TermRender for GameFieldRight {
-    fn output(&self, style: &impl TermStyle) -> Vec<Vec<TermCell>> {
-        let mut lines = self.preview.output(style);
-        let well_block = self.well.output(style);
-        // Append empty line and text after preview block
-        lines.push(Vec::new());
-        if let Some(ref name) = self.well.player_name {
-            lines.push(vec![TermCell::Message(name.clone())]);
-        }
-        // extend height of lines to the height of well_block and then pad it with TermCell::Space
-        // Preview is always shorter than well
-        lines.resize(well_block.len(), Vec::new());
-        pad_block_right(&mut lines, style);
-        // Append well lines to preview lines, padding with TermCell::Space
-        for (preview_line, mut well_line) in lines.iter_mut().zip(well_block.into_iter()) {
-            preview_line.push(TermCell::Space);
-            preview_line.append(&mut well_line);
-        }
-        lines
-    }
-}
-
 pub struct GameFieldPair {
-    opponent: GameFieldLeft,
-    player: GameFieldRight,
+    opponent_well: WellField,
+    opponent_preview: PreviewField,
+    player_well: WellField,
+    player_preview: PreviewField,
     message: Vec<String>,
 }
 
 impl GameFieldPair {
  pub fn new(state: TetrisPairState, message: Vec<String>) -> Self {
-        let player = GameFieldRight::new(state.player.clone(), state.player.name.clone());
-        let opponent = GameFieldLeft::new(state.opponent.clone(), state.opponent.name.clone());
-        Self { opponent, player, message }
+        let opponent_well = WellField::new_with_player(state.opponent.well, state.opponent.game_over, state.opponent.name.clone());
+        let opponent_preview = PreviewField(state.opponent.preview);
+        let player_well = WellField::new_with_player(state.player.well, state.player.game_over, state.player.name.clone());
+        let player_preview = PreviewField(state.player.preview);
+        Self { 
+            opponent_well, 
+            opponent_preview, 
+            player_well, 
+            player_preview, 
+            message 
+        }
  }
 }
 
 impl TermRender for GameFieldPair {
     fn output(&self, style: &impl TermStyle) -> Vec<Vec<TermCell>> {
-        let mut lines = self.opponent.output(style);
-        let right_block = self.player.output(style);
-        // Append opponent lines to player lines, padding with TermCell::Space
-        for (line, mut right_line) in lines.iter_mut().zip(right_block.into_iter()) {
-            line.push(TermCell::Space);
-            line.push(TermCell::Space);
-            line.push(TermCell::Space);
-            line.push(TermCell::Space);
-            line.append(&mut right_line);
+        let mut opponent_well_lines = self.opponent_well.output(style);
+        let mut opponent_preview_lines = self.opponent_preview.output(style);
+        let mut player_well_lines = self.player_well.output(style);
+        let mut player_preview_lines = self.player_preview.output(style);
+
+        // Add player names after previews
+        if let Some(ref name) = self.opponent_well.player_name {
+            opponent_preview_lines.push(Vec::new()); // empty line
+            opponent_preview_lines.push(vec![TermCell::Message(name.clone())]);
         }
+        if let Some(ref name) = self.player_well.player_name {
+            player_preview_lines.push(Vec::new()); // empty line
+            player_preview_lines.push(vec![TermCell::Message(name.clone())]);
+        }
+
+        // Pad preview blocks to the same width
+        pad_block_right(&mut opponent_preview_lines, style);
+        pad_block_right(&mut player_preview_lines, style);
+        pad_block_right(&mut opponent_well_lines, style);
+        pad_block_right(&mut player_well_lines, style);
+
+        // Calculate widths for each section (they're already padded internally)
+        let opponent_well_width = if opponent_well_lines.is_empty() {
+            0
+        } else {
+            opponent_well_lines[0].iter().map(|c| style.width(c)).sum()
+        };
+        let opponent_preview_width = if opponent_preview_lines.is_empty() {
+            0
+        } else {
+            opponent_preview_lines[0].iter().map(|c| style.width(c)).sum()
+        };
+        let player_preview_width = if player_preview_lines.is_empty() {
+            0
+        } else {
+            player_preview_lines[0].iter().map(|c| style.width(c)).sum()
+        };
+        let player_well_width = if player_well_lines.is_empty() {
+            0
+        } else {
+            player_well_lines[0].iter().map(|c| style.width(c)).sum()
+        };
+
+        // Calculate max message width
+        let max_message_width = self.message.iter()
+            .map(|m| m.len())
+            .max()
+            .unwrap_or(0);
+
+        let mut lines = Vec::new();
+        let preview_len = opponent_preview_lines.len().max(player_preview_lines.len());
+        let well_len = opponent_well_lines.len().max(player_well_lines.len());
+        let total_lines = well_len;
+        
+        // Middle section width: opponent_preview + 2 spaces + player_preview
+        let middle_section_width = opponent_preview_width + 2 + player_preview_width;
+        // Ensure message width is at least as wide as the middle section
+        let message_section_width = middle_section_width.max(max_message_width);
+
+        // Generate all lines
+        for i in 0..total_lines {
+            let mut line = Vec::new();
+            
+            // Opponent well
+            if i < opponent_well_lines.len() {
+                line.append(&mut opponent_well_lines[i].clone());
+            } else {
+                // Pad with spaces if this line doesn't exist
+                for _ in 0..opponent_well_width {
+                    line.push(TermCell::Space);
+                }
+            }
+            line.push(TermCell::Space);
+            
+            // Middle section: either previews or message
+            if i < preview_len {
+                // Show previews: <opponent_preview> <player_preview>
+                
+                // Opponent preview
+                if i < opponent_preview_lines.len() {
+                    line.append(&mut opponent_preview_lines[i].clone());
+                } else {
+                    // Pad with spaces if this line doesn't exist
+                    for _ in 0..opponent_preview_width {
+                        line.push(TermCell::Space);
+                    }
+                }
+                line.push(TermCell::Space);
+                line.push(TermCell::Space);
+                
+                // Player preview
+                if i < player_preview_lines.len() {
+                    line.append(&mut player_preview_lines[i].clone());
+                } else {
+                    // Pad with spaces if this line doesn't exist
+                    for _ in 0..player_preview_width {
+                        line.push(TermCell::Space);
+                    }
+                }
+                
+                // Pad middle section to full width if needed
+                let current_middle_width = opponent_preview_width + 2 + player_preview_width;
+                for _ in current_middle_width..message_section_width {
+                    line.push(TermCell::Space);
+                }
+            } else {
+                // Show message
+                line.push(TermCell::Space);
+                
+                let message_idx = i - preview_len;
+                if message_idx < self.message.len() {
+                    let msg = &self.message[message_idx];
+                    line.push(TermCell::Message(msg.clone()));
+                    let padding = message_section_width - 2 - msg.len();
+                    for _ in 0..padding {
+                        line.push(TermCell::Space);
+                    }
+                } else {
+                    // Pad with spaces
+                    for _ in 0..(message_section_width - 2) {
+                        line.push(TermCell::Space);
+                    }
+                }
+                line.push(TermCell::Space);
+            }
+            
+            line.push(TermCell::Space);
+            
+            // Player well
+            if i < player_well_lines.len() {
+                line.append(&mut player_well_lines[i].clone());
+            } else {
+                // Pad with spaces if this line doesn't exist
+                for _ in 0..player_well_width {
+                    line.push(TermCell::Space);
+                }
+            }
+            
+            lines.push(line);
+        }
+
         lines
     }
 }
