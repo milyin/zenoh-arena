@@ -20,5 +20,6 @@ pub struct TetrisPairState {
 impl TetrisPairState {
     pub fn swap(&mut self) {
         std::mem::swap(&mut self.player, &mut self.opponent);
+        std::mem::swap(&mut self.player_id, &mut self.opponent_id);
     }
 }

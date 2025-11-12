@@ -1,7 +1,6 @@
 use clap::Parser;
 use console::{Key, Term};
 use std::path::PathBuf;
-use std::time::Duration;
 use z_tetris::engine::{TetrisAction, TetrisEngine};
 use z_tetris::{Action, AnsiTermStyle, GameFieldPair, TermRender, TetrisPairState};
 use zenoh::key_expr::KeyExpr;
@@ -118,8 +117,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create rendering terminal (separate from input)
     let render_term = Term::stdout();
-    let mut last_render = std::time::Instant::now();
-    let render_interval = Duration::from_millis(50); // 20 FPS
 
     // Main step loop - processes commands and renders state
     loop {
@@ -129,32 +126,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Node stopped");
                 break;
             }
-            StepResult::GameState(_) | StepResult::Timeout | StepResult::RoleChanged(_) => {
-                // Get the current state
+            StepResult::GameState(mut game_state) => {
+                // Game state changed - render it
                 let state = node.node_state();
-                let game_state = node.game_state();
                 
-                match state {
-                    NodeState::Host { .. } | NodeState::Client { .. } => {
-                        if let Some(game_state) = game_state {
-                            // Render the game state
-                            if last_render.elapsed() >= render_interval {
-                                render_game(&render_term, &game_state)?;
-                                last_render = std::time::Instant::now();
-                            }
-                        }
-                    }
-                    NodeState::SearchingHost => {
-                        // Clear rendering terminal while searching
-                        render_term.clear_screen()?;
-                        render_term.move_cursor_to(0, 0)?;
-                        render_term.write_line("Searching for host...")?;
-                        render_term.flush()?;
-                    }
-                    _ => {
-                        // No game state to render yet or in another state
-                    }
+                // If we're a client, swap player and opponent views
+                if matches!(state, NodeState::Client { .. }) {
+                    game_state.swap();
                 }
+                
+                render_game(&render_term, &game_state)?;
+            }
+            StepResult::RoleChanged(_) => {
+                // Role changed - later show status, now unused
+            }
+            StepResult::Timeout => {
+                // Timeout - no game state change, don't render
             }
         }
     }
