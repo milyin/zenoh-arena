@@ -1,5 +1,5 @@
 use clap::Parser;
-use std::io::{self, Read};
+use console::Term;
 use std::path::PathBuf;
 use z_bonjour::engine::{BonjourAction, BonjourEngine};
 use zenoh::key_expr::KeyExpr;
@@ -50,6 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Declare node with configured parameters
     let mut node_builder = session
         .declare_arena_node(BonjourEngine::new)
+        .step_timeout_break_ms(10000)
         .force_host(args.force_host);
 
     // Apply name if provided
@@ -75,20 +76,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get command sender for the node
     let node_sender = node.sender();
 
+    // Setup Ctrl+C handler
+    let ctrlc_sender = node_sender.clone();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        println!("\n→ Ctrl+C received, stopping...");
+        let _ = ctrlc_sender.send(NodeCommand::Stop);
+    });
+
     // Spawn keyboard input task
     let keyboard_sender = node_sender.clone();
     let keyboard_task = tokio::task::spawn_blocking(move || {
-        let stdin = io::stdin();
-        let mut reader = stdin.lock();
-        let mut buf = [0u8; 1];
+        let term = Term::stdout();
 
         loop {
-            if reader.read_exact(&mut buf).is_err() {
-                break;
-            }
-
-            match buf[0] {
-                b'b' | b'B' => {
+            match term.read_key() {
+                Ok(console::Key::Char('b') | console::Key::Char('B')) => {
                     println!("→ Sending Bonjour action...");
                     if keyboard_sender
                         .send(NodeCommand::GameAction(BonjourAction::Bonjour))
@@ -97,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                 }
-                b's' | b'S' => {
+                Ok(console::Key::Char('s') | console::Key::Char('S')) => {
                     println!("→ Sending Bonsoir action...");
                     if keyboard_sender
                         .send(NodeCommand::GameAction(BonjourAction::Bonsoir))
@@ -106,9 +109,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                 }
-                b'q' | b'Q' => {
+                Ok(console::Key::Char('q') | console::Key::Char('Q')) => {
                     println!("→ Quit requested");
                     let _ = keyboard_sender.send(NodeCommand::Stop);
+                    break;
+                }
+                Ok(console::Key::Enter) => {
+                    // Just ignore Enter key
+                }
+                Err(_) => {
+                    // Error reading from terminal, exit
                     break;
                 }
                 _ => {}
@@ -118,23 +128,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Main step loop - processes commands and prints state
     loop {
-        match node.step().await? {
+        let result = node.step().await?;
+        
+        // Print status line for each event
+        match result {
             StepResult::Stop => {
-                // Node stopped
-                println!("Node stopped");
+                println!("[STOPPED] Node: {}", node.id());
                 break;
             }
             StepResult::RoleChanged(role) => {
-                println!("→ Node role changed to: {:?}", role);
+                println!("[Role: {:?}] State: {} | Node: {}", role, node.state(), node.id());
             }
             StepResult::GameState(state) => {
-                println!("Game state: {}", state);
+                println!("[Game: {}] State: {} | Node: {}", state, node.state(), node.id());
             }
             StepResult::Timeout => {
-                println!("Timeout passed without state update");
+                println!("[Status] State: {} | Node: {}", node.state(), node.id());
             }
         }
-        println!("Node state: {}", node.state());
     }
 
     // Wait for keyboard task to finish
