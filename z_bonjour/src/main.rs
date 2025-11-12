@@ -14,8 +14,8 @@ struct Args {
     name: Option<String>,
 
     /// Key expression prefix
-    #[arg(short, long)]
-    prefix: Option<KeyExpr<'static>>,
+    #[arg(short, long, default_value = "zenoh/bonjour")]
+    prefix: KeyExpr<'static>,
 
     /// Force host mode
     #[arg(short, long)]
@@ -57,19 +57,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         node_builder = node_builder.name(name)?;
     }
 
-    // Apply prefix if provided
-    if let Some(prefix) = args.prefix.clone() {
-        node_builder = node_builder.prefix(prefix);
-    }
+    // Apply prefix
+    node_builder = node_builder.prefix(args.prefix.clone());
 
     let mut node = node_builder.await?;
 
     println!("=== z_bonjour - Zenoh Arena Demo ===");
     println!("Node ID: {}", node.id());
     println!("Force host: {}", args.force_host);
-    if let Some(ref prefix) = args.prefix {
-        println!("Prefix: {}", prefix);
-    }
+    println!("Prefix: {}", args.prefix);
     println!("Commands:");
     println!("  b - Send Bonjour action (increment counter)");
     println!("  s - Send Bonsoir action (decrement counter)");
