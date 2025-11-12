@@ -129,9 +129,9 @@ pub enum NodeState {
 impl std::fmt::Display for NodeState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NodeState::SearchingHost => write!(f, "Searching for host..."),
+            NodeState::SearchingHost => write!(f, "Searching"),
             NodeState::Client { host_id } => {
-                write!(f, "Connected as client to host: {}", host_id)
+                write!(f, "Client to: {}", host_id)
             }
             NodeState::Host {
                 is_accepting,
@@ -144,7 +144,7 @@ impl std::fmt::Display for NodeState {
                     format!("{} client(s)", connected_clients.len())
                 };
                 
-                write!(f, "Host mode ({}, {})", accepting_str, client_info)
+                write!(f, "Host ({}, {})", accepting_str, client_info)
             }
             NodeState::Stop => write!(f, "Node stopped"),
         }

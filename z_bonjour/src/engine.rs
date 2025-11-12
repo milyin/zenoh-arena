@@ -7,17 +7,15 @@ pub enum BonjourAction {
     Bonsoir,
 }
 
-/// State type - tracks days and bonjours
+/// State type - tracks bonjours counter
 #[derive(Debug, Clone)]
 pub struct BonjourState {
-    pub days: u64,
     pub bonjours: i64,
 }
 
 impl BonjourState {
     pub fn new() -> Self {
         Self { 
-            days: 0,
             bonjours: 0,
         }
     }
@@ -31,7 +29,7 @@ impl Default for BonjourState {
 
 impl std::fmt::Display for BonjourState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Day {} | Bonjours: {}", self.days, self.bonjours)
+        write!(f, "Bonjours: {}", self.bonjours)
     }
 }
 
@@ -47,31 +45,15 @@ impl BonjourEngine {
     ) -> Self {
         let mut state = initial_state.unwrap_or_default();
         
-        // Spawn a task to process actions and increment days
+        // Spawn a task to process actions
         std::thread::spawn(move || {
-            let day_duration = std::time::Duration::from_secs(5);
-            
-            loop {
-                // Wait for an action with 5-second timeout for day tracking
-                match input_rx.recv_timeout(day_duration) {
-                    Ok((_node_id, action)) => {
-                        // Update bonjours counter based on action type
-                        match action {
-                            BonjourAction::Bonjour => state.bonjours += 1,
-                            BonjourAction::Bonsoir => state.bonjours -= 1,
-                        }
-                        let _ = output_tx.send(state.clone());
-                    }
-                    Err(flume::RecvTimeoutError::Timeout) => {
-                        // 5 seconds passed - increment day counter
-                        state.days += 1;
-                        let _ = output_tx.send(state.clone());
-                    }
-                    Err(flume::RecvTimeoutError::Disconnected) => {
-                        // Channel closed - exit loop
-                        break;
-                    }
+            while let Ok((_node_id, action)) = input_rx.recv() {
+                // Update bonjours counter based on action type
+                match action {
+                    BonjourAction::Bonjour => state.bonjours += 1,
+                    BonjourAction::Bonsoir => state.bonjours -= 1,
                 }
+                let _ = output_tx.send(state.clone());
             }
         });
 
@@ -115,16 +97,14 @@ impl zenoh_ext::Deserialize for BonjourAction {
 // Implement zenoh-ext serialization for BonjourState
 impl zenoh_ext::Serialize for BonjourState {
     fn serialize(&self, serializer: &mut zenoh_ext::ZSerializer) {
-        self.days.serialize(serializer);
         self.bonjours.serialize(serializer);
     }
 }
 
 impl zenoh_ext::Deserialize for BonjourState {
     fn deserialize(deserializer: &mut zenoh_ext::ZDeserializer) -> Result<Self, zenoh_ext::ZDeserializeError> {
-        let days: u64 = u64::deserialize(deserializer)?;
         let bonjours: i64 = i64::deserialize(deserializer)?;
-        Ok(BonjourState { days, bonjours })
+        Ok(BonjourState { bonjours })
     }
 }
 
@@ -236,33 +216,31 @@ mod tests {
 
     #[test]
     fn test_state_serialization() {
-        let state = BonjourState { days: 5, bonjours: 42 };
+        let state = BonjourState { bonjours: 42 };
         
         // Serialize
         let zbytes = zenoh_ext::z_serialize(&state);
         
         // Deserialize
         let deserialized: BonjourState = zenoh_ext::z_deserialize(&zbytes).unwrap();
-        assert_eq!(deserialized.days, 5);
         assert_eq!(deserialized.bonjours, 42);
     }
 
     #[test]
     fn test_state_serialization_negative() {
-        let state = BonjourState { days: 10, bonjours: -42 };
+        let state = BonjourState { bonjours: -42 };
         
         // Serialize
         let zbytes = zenoh_ext::z_serialize(&state);
         
         // Deserialize
         let deserialized: BonjourState = zenoh_ext::z_deserialize(&zbytes).unwrap();
-        assert_eq!(deserialized.days, 10);
         assert_eq!(deserialized.bonjours, -42);
     }
 
     #[test]
     fn test_state_display() {
-        let state = BonjourState { days: 5, bonjours: 42 };
-        assert_eq!(format!("{}", state), "Day 5 | Bonjours: 42");
+        let state = BonjourState { bonjours: 42 };
+        assert_eq!(format!("{}", state), "Bonjours: 42");
     }
 }
