@@ -15,18 +15,15 @@ use crate::{
 };
 
 /// State while acting as a host
-pub(crate) struct HostState<E>
+pub(crate) struct HostState<A, S>
 where
-    E: GameEngine,
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
 {
     /// List of connected client IDs
     pub(crate) connected_clients: Vec<NodeId>,
-    /// Game engine (only present in Host mode)
-    pub(crate) engine: E,
-    /// Input channel sender (for HostState to send actions to engine)
-    pub(crate) input_tx: flume::Sender<(NodeId, E::Action)>,
-    /// Output channel receiver (for HostState to receive states from engine)
-    pub(crate) output_rx: flume::Receiver<E::State>,
+    /// Game engine reference
+    pub(crate) engine: Arc<dyn GameEngine<Action = A, State = S>>,
     /// Liveliness token for host discovery
     pub(crate) _liveliness_token: Option<crate::network::NodeLivelinessToken>,
     /// Queryable for host discovery
@@ -34,14 +31,15 @@ where
     /// Liveliness watch to detect any client disconnect
     pub(crate) client_liveliness_watch: crate::network::NodeLivelinessWatch,
     /// Subscriber to receive actions from clients
-    pub(crate) action_subscriber: NodeSubscriber<E::Action>,
+    pub(crate) action_subscriber: NodeSubscriber<A>,
     /// Publisher to send game state to all clients
-    pub(crate) state_publisher: NodePublisher<E::State>,
+    pub(crate) state_publisher: NodePublisher<S>,
 }
 
-impl<E> HostState<E>
+impl<A, S> HostState<A, S>
 where
-    E: GameEngine,
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
 {
     /// Check if host has capacity for more clients
     ///
@@ -82,8 +80,8 @@ where
         config: &NodeConfig,
         node_id: &NodeId,
         session: &zenoh::Session,
-        command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-    ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)> {
+        command_rx: &flume::Receiver<NodeCommand<A>>,
+    ) -> Result<(NodeStateInternal<A, S>, StepResult<S>)> {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_break_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
@@ -122,8 +120,8 @@ where
                             node_id,
                             sender_id
                         );
-                        // Send action to the engine via input channel
-                        if let Err(e) = self.input_tx.send((sender_id, action)) {
+                        // Send action to the engine via its channel
+                        if let Err(e) = self.engine.action_sender().send((sender_id, action)) {
                             tracing::error!(
                                 "Node '{}' failed to send action to engine: {}",
                                 node_id,
@@ -144,7 +142,7 @@ where
                 }
             }
             // State received from engine
-            state_result = self.output_rx.recv_async() => {
+            state_result = self.engine.state_receiver().recv_async() => {
                 match state_result {
                     Ok(new_game_state) => {
                         // Publish game state to all clients
@@ -167,6 +165,8 @@ where
                             "Node '{}' engine thread exited (game over)",
                             node_id
                         );
+                        // Stop the engine before transitioning
+                        self.engine.stop().await;
                         return Ok((
                             NodeStateInternal::searching(),
                             StepResult::RoleChanged(crate::NodeRole::SearchingHost),
@@ -195,8 +195,8 @@ where
                         "Node '{}' processing action in host mode",
                         node_id
                     );
-                    // Send action to the engine via input channel
-                    if let Err(e) = self.input_tx.send((node_id.clone(), action)) {
+                    // Send action to the engine via its channel
+                    if let Err(e) = self.engine.action_sender().send((node_id.clone(), action)) {
                         tracing::error!(
                             "Node '{}' failed to send action to engine: {}",
                             node_id,

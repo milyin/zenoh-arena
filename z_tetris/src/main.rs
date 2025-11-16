@@ -2,6 +2,7 @@ use clap::Parser;
 use console::{Key, Term};
 use std::path::PathBuf;
 use std::vec;
+use std::sync::Arc;
 use z_tetris::engine::{TetrisAction, TetrisEngine};
 use z_tetris::{Action, AnsiTermStyle, GameFieldPair, TermRender, TetrisPairState};
 use zenoh::key_expr::KeyExpr;
@@ -49,9 +50,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("Failed to open zenoh session: {}", e))?;
 
+    // Create the engine
+    let engine = Arc::new(TetrisEngine::new());
+
     // Declare node with configured parameters
     let mut node_builder = session
-        .declare_arena_node(TetrisEngine::new)
+        .declare_arena_node(engine)
         .force_host(args.force_host)
         .step_timeout_break_ms(1000);
 

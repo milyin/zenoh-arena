@@ -1,7 +1,8 @@
 use zenoh::{Resolvable, key_expr::KeyExpr};
 use crate::error::Result;
+use std::sync::Arc;
 
-use crate::node::{config::NodeConfig, game_engine::{EngineFactory, GameEngine}, arena_node::Node, types::NodeId};
+use crate::node::{config::NodeConfig, game_engine::GameEngine, arena_node::Node, types::NodeId};
 
 /// Extension trait for zenoh::Session to declare arena nodes
 /// Extension trait for zenoh::Session to add arena node declaration
@@ -11,44 +12,41 @@ pub trait SessionExt {
     /// # Example
     /// ```no_run
     /// use zenoh_arena::{SessionExt, GameEngine, NodeId};
+    /// use std::sync::Arc;
     ///
     /// # struct MyEngine;
-    /// # impl MyEngine {
-    /// #     fn new(
-    /// #         _host_id: NodeId,
-    /// #         input_rx: flume::Receiver<(NodeId, String)>,
-    /// #         output_tx: flume::Sender<String>,
-    /// #         _initial_state: Option<String>,
-    /// #     ) -> Self {
-    /// #         Self
-    /// #     }
-    /// # }
     /// # impl GameEngine for MyEngine {
     /// #     type Action = String;
     /// #     type State = String;
     /// #     fn max_clients(&self) -> Option<usize> { None }
+    /// #     fn set_node_id(&self, _node_id: NodeId) {}
+    /// #     fn run(&self, _initial_state: Option<String>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> { Box::pin(async {}) }
+    /// #     fn stop(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> { Box::pin(async {}) }
+    /// #     fn action_sender(&self) -> &flume::Sender<(NodeId, String)> { unimplemented!() }
+    /// #     fn state_receiver(&self) -> &flume::Receiver<String> { unimplemented!() }
     /// # }
     /// # async fn example() {
     /// let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+    /// let engine = Arc::new(MyEngine);
     /// let node = session
-    ///     .declare_arena_node(MyEngine::new)
+    ///     .declare_arena_node(engine)
     ///     .await
     ///     .unwrap();
     /// # }
     /// ```
-    fn declare_arena_node<E, F>(&self, get_engine: F) -> NodeBuilder<'_, E, F>
+    fn declare_arena_node<A, S>(&self, engine: Arc<dyn GameEngine<Action = A, State = S>>) -> NodeBuilder<'_, A, S>
     where
-        E: GameEngine,
-        F: EngineFactory<E>;
+        A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + 'static,
+        S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone + 'static;
 }
 
 impl SessionExt for zenoh::Session {
-    fn declare_arena_node<E, F>(&self, get_engine: F) -> NodeBuilder<'_, E, F>
+    fn declare_arena_node<A, S>(&self, engine: Arc<dyn GameEngine<Action = A, State = S>>) -> NodeBuilder<'_, A, S>
     where
-        E: GameEngine,
-        F: EngineFactory<E>,
+        A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + 'static,
+        S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone + 'static,
     {
-        NodeBuilder::new(self, get_engine)
+        NodeBuilder::new(self, engine)
     }
 }
 
@@ -56,21 +54,27 @@ impl SessionExt for zenoh::Session {
 ///
 /// Allows configuring the node before creating it, similar to zenoh's builder pattern.
 #[must_use = "Resolvables do nothing unless you resolve them using `.await` or `zenoh::Wait::wait`"]
-pub struct NodeBuilder<'a, E: GameEngine, F: EngineFactory<E>> {
+pub struct NodeBuilder<'a, A, S>
+where
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
+{
     session: &'a zenoh::Session,
-    get_engine: F,
+    engine: Arc<dyn GameEngine<Action = A, State = S>>,
     config: NodeConfig,
-    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<'a, E: GameEngine, F: EngineFactory<E>> NodeBuilder<'a, E, F> {
+impl<'a, A, S> NodeBuilder<'a, A, S>
+where
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
+{
     /// Create a new NodeBuilder
-    fn new(session: &'a zenoh::Session, get_engine: F) -> Self {
+    fn new(session: &'a zenoh::Session, engine: Arc<dyn GameEngine<Action = A, State = S>>) -> Self {
         Self {
             session,
-            get_engine,
+            engine,
             config: NodeConfig::default(),
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -116,12 +120,18 @@ impl<'a, E: GameEngine, F: EngineFactory<E>> NodeBuilder<'a, E, F> {
     }
 }
 
-impl<'a, E: GameEngine, F: EngineFactory<E>> Resolvable for NodeBuilder<'a, E, F> {
-    type To = Result<Node<E, F>>;
+impl<'a, A, S> Resolvable for NodeBuilder<'a, A, S>
+where
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
+{
+    type To = Result<Node<A, S>>;
 }
 
-impl<'a, E: GameEngine, F: EngineFactory<E> + Send + 'a> std::future::IntoFuture
-    for NodeBuilder<'a, E, F>
+impl<'a, A, S> std::future::IntoFuture for NodeBuilder<'a, A, S>
+where
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + 'static,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone + 'static,
 {
     type Output = <Self as Resolvable>::To;
     type IntoFuture =
@@ -131,7 +141,7 @@ impl<'a, E: GameEngine, F: EngineFactory<E> + Send + 'a> std::future::IntoFuture
         Box::pin(async move {
             // Clone the session since Node::new_internal takes ownership
             let session = self.session.clone();
-            Node::new_internal(self.config, session, self.get_engine).await
+            Node::new_internal(self.config, session, self.engine).await
         })
     }
 }

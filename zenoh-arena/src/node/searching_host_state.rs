@@ -3,35 +3,41 @@ use super::config::NodeConfig;
 use crate::{NodeRole, StepResult};
 use crate::error::Result;
 use crate::network::HostQuerier;
-use super::game_engine::{EngineFactory, GameEngine};
+use super::game_engine::GameEngine;
 use super::arena_node::NodeCommand;
 use super::types::{NodeId, NodeStateInternal};
 use rand::Rng;
+use std::sync::Arc;
 
 /// State while searching for available hosts
-pub(crate) struct SearchingHostState<E: GameEngine> {
+pub(crate) struct SearchingHostState<A, S>
+where
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
+{
     // Empty state - game_state is passed through step() method
-    pub(crate) _phantom: std::marker::PhantomData<E>,
+    pub(crate) _phantom: std::marker::PhantomData<(A, S)>,
 }
 
-impl<E: GameEngine> SearchingHostState<E> {
+impl<A, S> SearchingHostState<A, S>
+where
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
+{
     /// Process the SearchingHost state - search for available hosts and attempt to connect
     ///
     /// Consumes self and returns the next state.
     /// Uses HostQuerier to find and connect to available hosts. If timeout expires or
     /// no hosts are available/accept connection, transitions to Host state.
-    pub(crate) async fn step<F>(
+    pub(crate) async fn step(
         self,
         session: &zenoh::Session,
         config: &NodeConfig,
         node_id: &NodeId,
-        command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-        get_engine: &F,
-        game_state: Option<E::State>,
-    ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)>
-    where
-        F: EngineFactory<E>,
-    {
+        command_rx: &flume::Receiver<NodeCommand<A>>,
+        engine: Arc<dyn GameEngine<Action = A, State = S>>,
+        game_state: Option<S>,
+    ) -> Result<(NodeStateInternal<A, S>, StepResult<S>)> {
         tracing::info!("Node '{}' searching for hosts...", node_id);
 
         // Add randomized jitter to prevent thundering herd when multiple clients
@@ -125,7 +131,7 @@ impl<E: GameEngine> SearchingHostState<E> {
         } else {
             // Transition to Host state with the preserved initial state or game state from Node
             let next_state = NodeStateInternal::host(
-                get_engine,
+                engine,
                 session,
                 config.keyexpr_prefix.clone(),
                 node_id,

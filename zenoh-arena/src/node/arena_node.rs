@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use super::config::NodeConfig;
-use super::game_engine::{EngineFactory, GameEngine};
+use super::game_engine::GameEngine;
 use crate::error::{ArenaError, Result};
 use crate::network::NodeLivelinessToken;
 use crate::network::keyexpr::NodeType;
@@ -21,7 +21,11 @@ pub enum NodeCommand<A> {
 ///
 /// A Node is autonomous and manages its own role, connections, and game state.
 /// There is no central "Arena" - each node has its local view of the network.
-pub struct Node<E: GameEngine, F: EngineFactory<E>> {
+pub struct Node<A, S>
+where
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
+{
     /// Node identifier
     id: NodeId,
 
@@ -29,41 +33,45 @@ pub struct Node<E: GameEngine, F: EngineFactory<E>> {
     config: NodeConfig,
 
     /// Current node state
-    state: NodeStateInternal<E>,
+    state: NodeStateInternal<A, S>,
 
     /// Zenoh session
     session: zenoh::Session,
 
-    /// Engine factory - called when transitioning to host mode
-    get_engine: Arc<F>,
+    /// Game engine reference
+    engine: Arc<dyn GameEngine<Action = A, State = S>>,
 
     /// Receiver for commands from the application
-    command_rx: flume::Receiver<NodeCommand<E::Action>>,
+    command_rx: flume::Receiver<NodeCommand<A>>,
 
     /// Sender for commands from the application
-    command_tx: flume::Sender<NodeCommand<E::Action>>,
+    command_tx: flume::Sender<NodeCommand<A>>,
 
     /// Liveliness token for this node's identity (Role::Node)
     /// Kept throughout the node's lifetime to protect against other nodes with the same name
     _node_liveliness_token: NodeLivelinessToken,
 
     /// Current game state (maintained across state transitions)
-    game_state: Option<E::State>,
+    game_state: Option<S>,
 }
 
-impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
+impl<A, S> Node<A, S>
+where
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
+{
     /// Create a new Node instance (internal use only - use builder pattern via SessionExt)
     pub(crate) async fn new_internal(
         config: NodeConfig,
         session: zenoh::Session,
-        get_engine: F,
+        engine: Arc<dyn GameEngine<Action = A, State = S>>,
     ) -> Result<Self> {
         let id = config.node_id.clone();
 
         tracing::info!("Node '{}' initialized with Zenoh session", id);
 
-        // Wrap the engine factory in Arc for shared ownership
-        let get_engine = Arc::new(get_engine);
+        // Inform engine of its node ID
+        engine.set_node_id(id.clone());
 
         // Create liveliness token for this node's identity (NodeType::Node)
         // This protects the node name from conflicts with other nodes
@@ -84,7 +92,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
 
             // Use the constructor function to create host state with no initial state
             NodeStateInternal::host(
-                &*get_engine,
+                engine.clone(),
                 &session,
                 config.keyexpr_prefix.clone(),
                 &id,
@@ -101,7 +109,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
             config,
             state,
             session,
-            get_engine,
+            engine,
             command_rx,
             command_tx,
             _node_liveliness_token: node_liveliness_token,
@@ -122,7 +130,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
     }
 
     /// Get a sender for sending commands to this node
-    pub fn sender(&self) -> flume::Sender<NodeCommand<E::Action>> {
+    pub fn sender(&self) -> flume::Sender<NodeCommand<A>> {
         self.command_tx.clone()
     }
 
@@ -133,7 +141,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
     /// - A new game state is produced by the engine (returns GameState)
     /// - The step timeout (configured in NodeConfig) elapses (returns Timeout)
     /// - A Stop command is received (returns Stop)
-    pub async fn step(&mut self) -> Result<StepResult<E::State>> {
+    pub async fn step(&mut self) -> Result<StepResult<S>> {
         // If force_host is enabled, only Host state is allowed
         if self.config.force_host && !matches!(self.state, NodeStateInternal::Host { .. }) {
             return Err(ArenaError::Internal(
@@ -151,7 +159,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
                         &self.config,
                         &self.id,
                         &self.command_rx,
-                        &*self.get_engine,
+                        self.engine.clone(),
                         self.game_state.clone(),
                     )
                     .await?
@@ -193,7 +201,7 @@ impl<E: GameEngine, F: EngineFactory<E>> Node<E, F> {
     }
 
     /// Get the current game state if available
-    pub fn game_state(&self) -> Option<E::State> {
+    pub fn game_state(&self) -> Option<S> {
         self.game_state.clone()
     }
 }
@@ -210,20 +218,35 @@ mod tests {
     struct TestEngine {
         #[allow(dead_code)]
         max_clients: Option<usize>,
+        node_id: std::sync::Mutex<Option<NodeId>>,
+        input_tx: flume::Sender<(NodeId, u32)>,
+        output_rx: flume::Receiver<String>,
+        stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
 
     impl TestEngine {
-        fn new(_host_id: NodeId, input_rx: flume::Receiver<(NodeId, u32)>, output_tx: flume::Sender<String>) -> Self {
+        fn new() -> Self {
+            let (input_tx, input_rx) = flume::unbounded();
+            let (output_tx, output_rx) = flume::unbounded();
+            let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop_flag_clone = stop_flag.clone();
+            
             // Spawn a task to process actions
             std::thread::spawn(move || {
-                while let Ok((_node_id, _action)) = input_rx.recv() {
-                    // Process the action
-                    let _ = output_tx.send("processed".to_string());
+                while !stop_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Ok((_node_id, _action)) = input_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                        // Process the action
+                        let _ = output_tx.send("processed".to_string());
+                    }
                 }
             });
 
             Self {
                 max_clients: Some(4),
+                node_id: std::sync::Mutex::new(None),
+                input_tx,
+                output_rx,
+                stop_flag,
             }
         }
     }
@@ -234,6 +257,30 @@ mod tests {
 
         fn max_clients(&self) -> Option<usize> {
             self.max_clients
+        }
+        
+        fn set_node_id(&self, node_id: NodeId) {
+            *self.node_id.lock().unwrap() = Some(node_id);
+        }
+        
+        fn run(&self, _initial_state: Option<String>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+            Box::pin(async {
+                self.stop_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+            })
+        }
+        
+        fn stop(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+            Box::pin(async {
+                self.stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            })
+        }
+        
+        fn action_sender(&self) -> &flume::Sender<(NodeId, u32)> {
+            &self.input_tx
+        }
+        
+        fn state_receiver(&self) -> &flume::Receiver<String> {
+            &self.output_rx
         }
     }
 
@@ -276,9 +323,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_auto_generated_id() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
+        let engine = Arc::new(TestEngine::new());
 
-        let result = session.declare_arena_node(get_engine).await;
+        let result = session.declare_arena_node(engine).await;
         assert!(result.is_ok());
 
         let node = result.unwrap();
@@ -288,10 +335,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_custom_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
+        let engine = Arc::new(TestEngine::new());
 
         let result = session
-            .declare_arena_node(get_engine)
+            .declare_arena_node(engine)
             .name("my_custom_node".to_string())
             .unwrap()
             .await;
@@ -304,10 +351,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_creation_with_invalid_name() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
+        let engine = Arc::new(TestEngine::new());
 
         let builder_result = session
-            .declare_arena_node(get_engine)
+            .declare_arena_node(engine)
             .name("invalid/name".to_string());
 
         assert!(builder_result.is_err());
@@ -322,10 +369,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_step_with_force_host() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
+        let engine = Arc::new(TestEngine::new());
 
         let mut node = session
-            .declare_arena_node(get_engine)
+            .declare_arena_node(engine)
             .force_host(true)
             .await
             .unwrap();
@@ -348,10 +395,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_force_host_starts_in_host_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
+        let engine = Arc::new(TestEngine::new());
 
         let node = session
-            .declare_arena_node(get_engine)
+            .declare_arena_node(engine)
             .force_host(true)
             .await
             .unwrap();
@@ -362,9 +409,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_default_starts_in_searching_state() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
+        let engine = Arc::new(TestEngine::new());
 
-        let node = session.declare_arena_node(get_engine).await.unwrap();
+        let node = session.declare_arena_node(engine).await.unwrap();
         // Node should be in SearchingHost state by default
         assert!(matches!(node.state, NodeStateInternal::SearchingHost(_)));
     }
@@ -372,10 +419,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_node_processes_actions_in_host_mode() {
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
-        let get_engine = |host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx);
+        let engine = Arc::new(TestEngine::new());
 
         let mut node = session
-            .declare_arena_node(get_engine)
+            .declare_arena_node(engine)
             .force_host(true)
             .step_timeout_break_ms(50)
             .await
@@ -408,10 +455,11 @@ mod tests {
     async fn test_session_ext_declare_arena_node() {
         // Create a zenoh session
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+        let engine = Arc::new(TestEngine::new());
 
         // Use the extension trait to declare a node (name must be called first)
         let node = session
-            .declare_arena_node(|host_id, input_rx, output_tx, _initial_state| TestEngine::new(host_id, input_rx, output_tx))
+            .declare_arena_node(engine)
             .name("test_node".to_string())
             .unwrap()
             .force_host(true)

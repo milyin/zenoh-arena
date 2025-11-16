@@ -4,6 +4,8 @@ use crate::tetris_pair::{TetrisPair, PlayerSide};
 use crate::tetris::StepResult;
 use crate::state::TetrisPairState;
 use std::time;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Tetris action wrapper
 #[derive(Debug, Clone, Copy)]
@@ -12,68 +14,34 @@ pub struct TetrisAction {
 }
 
 /// Game engine that manages a Tetris game for two players
-pub struct TetrisEngine;
+pub struct TetrisEngine {
+    node_id: Mutex<Option<NodeId>>,
+    input_tx: flume::Sender<(NodeId, TetrisAction)>,
+    input_rx: flume::Receiver<(NodeId, TetrisAction)>,
+    output_tx: flume::Sender<TetrisPairState>,
+    output_rx: flume::Receiver<TetrisPairState>,
+    stop_flag: Arc<AtomicBool>,
+}
 
 impl TetrisEngine {
-    pub fn new(
-        host_id: NodeId,
-        input_rx: flume::Receiver<(NodeId, TetrisAction)>,
-        output_tx: flume::Sender<TetrisPairState>,
-        _initial_state: Option<TetrisPairState>,
-    ) -> Self {
-        // Spawn a background task to process actions
-        std::thread::spawn(move || {
-            let mut tetris_pair = TetrisPair::new(10, 20);
-            // Setup game speed
-            let step_delay = time::Duration::from_millis(10);
-            tetris_pair.set_fall_speed(1, 30);
-            tetris_pair.set_drop_speed(1, 1);
-            tetris_pair.set_line_remove_speed(3, 5);
-            
-            // Set player name initially
-            tetris_pair.set_player_name(PlayerSide::Player, Some(host_id.to_string()));
-            
-            let mut opponent_id: Option<NodeId> = None;
-            loop {
-                let start = time::Instant::now();
-                
-                // Process all pending actions using try_recv
-                while let Ok((client_id, action)) = input_rx.try_recv() {
-                    // Determine which player this is based on host_id
-                    let player_side = if client_id == host_id {
-                        PlayerSide::Player
-                    } else {
-                        if opponent_id.is_none() {
-                            tetris_pair.set_player_name(PlayerSide::Opponent, Some(client_id.to_string()));
-                            opponent_id = Some(client_id);
-                        }
-                        PlayerSide::Opponent
-                    };
+    pub fn new() -> Self {
+        let (input_tx, input_rx) = flume::unbounded();
+        let (output_tx, output_rx) = flume::unbounded();
+        
+        Self {
+            node_id: Mutex::new(None),
+            input_tx,
+            input_rx,
+            output_tx,
+            output_rx,
+            stop_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
 
-                    // Add action to the appropriate player
-                    tetris_pair.add_player_action(player_side, action.action);
-                }
-                
-                // Perform game step and send state only if something changed
-                if tetris_pair.step() != (StepResult::None, StepResult::None) {
-                    let state = tetris_pair.get_state();
-                    let _ = output_tx.send(state);
-                }
-                
-                // Check for game over and exit thread if game is over
-                if tetris_pair.is_game_over() {
-                    break;
-                }
-                
-                // Maintain consistent timing
-                let elapsed = start.elapsed();
-                if elapsed < step_delay {
-                    std::thread::sleep(step_delay - elapsed);
-                }
-            }
-        });
-
-        Self
+impl Default for TetrisEngine {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -83,6 +51,93 @@ impl GameEngine for TetrisEngine {
 
     fn max_clients(&self) -> Option<usize> {
         Some(1)
+    }
+    
+    fn set_node_id(&self, node_id: NodeId) {
+        *self.node_id.lock().unwrap() = Some(node_id);
+    }
+    
+    fn run(&self, _initial_state: Option<TetrisPairState>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            let host_id = self.node_id.lock().unwrap().clone().expect("node_id must be set before run");
+            let input_rx = self.input_rx.clone();
+            let output_tx = self.output_tx.clone();
+            let stop_flag = self.stop_flag.clone();
+            
+            // Reset stop flag
+            stop_flag.store(false, Ordering::Relaxed);
+            
+            // Spawn a background task to process actions
+            std::thread::spawn(move || {
+                let mut tetris_pair = TetrisPair::new(10, 20);
+                // Setup game speed
+                let step_delay = time::Duration::from_millis(10);
+                tetris_pair.set_fall_speed(1, 30);
+                tetris_pair.set_drop_speed(1, 1);
+                tetris_pair.set_line_remove_speed(3, 5);
+                
+                // Set player name initially
+                tetris_pair.set_player_name(PlayerSide::Player, Some(host_id.to_string()));
+                
+                let mut opponent_id: Option<NodeId> = None;
+                loop {
+                    // Check stop flag
+                    if stop_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    
+                    let start = time::Instant::now();
+                    
+                    // Process all pending actions using try_recv
+                    while let Ok((client_id, action)) = input_rx.try_recv() {
+                        // Determine which player this is based on host_id
+                        let player_side = if client_id == host_id {
+                            PlayerSide::Player
+                        } else {
+                            if opponent_id.is_none() {
+                                tetris_pair.set_player_name(PlayerSide::Opponent, Some(client_id.to_string()));
+                                opponent_id = Some(client_id);
+                            }
+                            PlayerSide::Opponent
+                        };
+
+                        // Add action to the appropriate player
+                        tetris_pair.add_player_action(player_side, action.action);
+                    }
+                    
+                    // Perform game step and send state only if something changed
+                    if tetris_pair.step() != (StepResult::None, StepResult::None) {
+                        let state = tetris_pair.get_state();
+                        let _ = output_tx.send(state);
+                    }
+                    
+                    // Check for game over and exit thread if game is over
+                    if tetris_pair.is_game_over() {
+                        break;
+                    }
+                    
+                    // Maintain consistent timing
+                    let elapsed = start.elapsed();
+                    if elapsed < step_delay {
+                        std::thread::sleep(step_delay - elapsed);
+                    }
+                }
+            });
+        })
+    }
+    
+    fn stop(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            self.stop_flag.store(true, Ordering::Relaxed);
+        })
+    }
+    
+    fn action_sender(&self) -> &flume::Sender<(NodeId, TetrisAction)> {
+        &self.input_tx
+    }
+    
+    fn state_receiver(&self) -> &flume::Receiver<TetrisPairState> {
+        &self.output_rx
     }
 }
 

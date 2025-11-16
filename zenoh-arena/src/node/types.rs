@@ -7,7 +7,7 @@ use crate::error::{ArenaError, Result};
 use crate::network::{HostQueryable, NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
 use crate::network::keyexpr::{LinkType, NodeType};
 use crate::node::client_state::ClientState;
-use crate::node::game_engine::{EngineFactory, GameEngine};
+use crate::node::game_engine::GameEngine;
 use crate::node::host_state::HostState;
 use crate::node::name_generator;
 use crate::node::searching_host_state::SearchingHostState;
@@ -152,27 +152,29 @@ impl std::fmt::Display for NodeState {
 }
 
 /// Current state of a Node (internal)
-pub(crate) enum NodeStateInternal<E>
+pub(crate) enum NodeStateInternal<A, S>
 where
-    E: GameEngine,
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
 {
     /// Searching for available hosts
     /// Carries optional initial state to use when becoming host
-    SearchingHost(SearchingHostState<E>),
+    SearchingHost(SearchingHostState<A, S>),
 
     /// Connected as client to a host
-    Client(ClientState<E>),
+    Client(ClientState<A, S>),
 
     /// Acting as host
-    Host(HostState<E>),
+    Host(HostState<A, S>),
 
     /// Node has stopped
     Stop,
 }
 
-impl<E> std::fmt::Debug for NodeStateInternal<E>
+impl<A, S> std::fmt::Debug for NodeStateInternal<A, S>
 where
-    E: GameEngine,
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -192,9 +194,10 @@ where
     }
 }
 
-impl<E> NodeStateInternal<E>
+impl<A, S> NodeStateInternal<A, S>
 where
-    E: GameEngine,
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
 {
     /// Transition to SearchingHost state from any state
     ///
@@ -208,25 +211,17 @@ where
     /// Create a new Host state
     ///
     /// Creates liveliness token and queryable for host discovery
-    pub async fn host<F>(
-        get_engine: &F,
+    pub async fn host(
+        engine: Arc<dyn GameEngine<Action = A, State = S>>,
         session: &zenoh::Session,
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
-        initial_state: Option<E::State>,
-    ) -> Result<Self>
-    where
-        E: GameEngine,
-        F: EngineFactory<E>,
-    {
+        initial_state: Option<S>,
+    ) -> Result<Self> {
         let prefix = prefix.into();
 
-        // Create channels for engine communication
-        let (input_tx, input_rx) = flume::unbounded();
-        let (output_tx, output_rx) = flume::unbounded();
-
-        // Create engine with the channels and optional initial state
-        let engine = get_engine(node_id.clone(), input_rx, output_tx, initial_state);
+        // Start the engine with the optional initial state
+        engine.run(initial_state).await;
 
         // Create host liveliness token for discovery
         let token =
@@ -254,8 +249,6 @@ where
         Ok(NodeStateInternal::Host(HostState {
             connected_clients: Vec::new(),
             engine,
-            input_tx,
-            output_rx,
             _liveliness_token: Some(token),
             queryable: Some(Arc::new(queryable)),
             client_liveliness_watch,
@@ -272,10 +265,7 @@ where
         prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
         client_id: NodeId,
-    ) -> Result<Self>
-    where
-        E::Action: zenoh_ext::Serialize,
-    {
+    ) -> Result<Self> {
         let prefix = prefix.into();
 
         // Create and subscribe to liveliness events for the host
@@ -315,9 +305,10 @@ where
     }
 }
 
-impl<E> NodeStateInternal<E>
+impl<A, S> NodeStateInternal<A, S>
 where
-    E: GameEngine,
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
 {
     /// Convert internal state to public NodeState
     pub(crate) fn to_node_state(&self) -> NodeState {

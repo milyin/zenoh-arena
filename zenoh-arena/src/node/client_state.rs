@@ -3,14 +3,14 @@ use crate::{NodeRole, StepResult};
 use crate::node::config::NodeConfig;
 use crate::error::Result;
 use crate::network::{NodeLivelinessToken, NodeLivelinessWatch, NodePublisher, NodeSubscriber};
-use crate::node::game_engine::GameEngine;
 use crate::node::arena_node::NodeCommand;
 use crate::node::types::{NodeId, NodeStateInternal};
 
 /// State while connected as a client to a host
-pub(crate) struct ClientState<E>
+pub(crate) struct ClientState<A, S>
 where
-    E: GameEngine,
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
 {
     /// ID of the host we're connected to
     pub(crate) host_id: NodeId,
@@ -19,14 +19,15 @@ where
     /// Client's liveliness token (type: Client) for the host to track disconnection
     pub(crate) _liveliness_token: NodeLivelinessToken,
     /// Publisher for sending actions to the host
-    pub(crate) action_publisher: NodePublisher<E::Action>,
+    pub(crate) action_publisher: NodePublisher<A>,
     /// Subscriber for receiving game state from the host
-    pub(crate) state_subscriber: NodeSubscriber<E::State>,
+    pub(crate) state_subscriber: NodeSubscriber<S>,
 }
 
-impl<E> ClientState<E>
+impl<A, S> ClientState<A, S>
 where
-    E: GameEngine,
+    A: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send,
+    S: zenoh_ext::Serialize + zenoh_ext::Deserialize + Send + Clone,
 {
     /// Process the Client state - handle commands while connected to a host
     ///
@@ -42,9 +43,9 @@ where
         mut self,
         config: &NodeConfig,
         node_id: &NodeId,
-        command_rx: &flume::Receiver<NodeCommand<E::Action>>,
-        _game_state: Option<E::State>,
-    ) -> Result<(NodeStateInternal<E>, StepResult<E::State>)> {
+        command_rx: &flume::Receiver<NodeCommand<A>>,
+        _game_state: Option<S>,
+    ) -> Result<(NodeStateInternal<A, S>, StepResult<S>)> {
         let timeout = tokio::time::Duration::from_millis(config.step_timeout_break_ms);
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);

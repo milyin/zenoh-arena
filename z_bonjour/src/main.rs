@@ -1,6 +1,7 @@
 use clap::Parser;
 use console::Term;
 use std::path::PathBuf;
+use std::sync::Arc;
 use z_bonjour::engine::{BonjourAction, BonjourEngine};
 use zenoh::key_expr::KeyExpr;
 use zenoh_arena::{NodeCommand, SessionExt, StepResult};
@@ -47,9 +48,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("Failed to open zenoh session: {}", e))?;
 
+    // Create the engine
+    let engine = Arc::new(BonjourEngine::new());
+
     // Declare node with configured parameters
     let mut node_builder = session
-        .declare_arena_node(BonjourEngine::new)
+        .declare_arena_node(engine)
         .step_timeout_break_ms(3000)
         .force_host(args.force_host);
 
@@ -143,7 +147,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}: new game state {}", node.id(), state);
             }
             StepResult::Timeout => {
-                println!("{}: {} {}", node.id(), node.state(), node.game_state().unwrap_or_default());
+                if let Some(game_state) = node.game_state() {
+                    println!("{}: {} {}", node.id(), node.state(), game_state);
+                } else {
+                    println!("{}: {}", node.id(), node.state());
+                }
             }
         }
     }
