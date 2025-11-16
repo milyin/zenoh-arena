@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::config::NodeConfig;
 use super::game_engine::GameEngine;
+use super::stats::{NodeStats, StatsTracker};
 use crate::error::{ArenaError, Result};
 use crate::network::NodeLivelinessToken;
 use crate::network::keyexpr::NodeType;
@@ -53,6 +54,9 @@ where
 
     /// Current game state (maintained across state transitions)
     game_state: Option<S>,
+
+    /// Statistics tracker for monitoring data throughput
+    stats_tracker: Arc<StatsTracker>,
 }
 
 impl<A, S> Node<A, S>
@@ -86,6 +90,9 @@ where
         // Create command channel
         let (command_tx, command_rx) = flume::unbounded();
 
+        // Create stats tracker
+        let stats_tracker = Arc::new(StatsTracker::new());
+
         // Initial state depends on force_host configuration
         let state = if config.force_host {
             tracing::info!("Node '{}' forced to host mode", id);
@@ -97,6 +104,7 @@ where
                 config.keyexpr_prefix.clone(),
                 &id,
                 None, // No initial state when force starting as host
+                stats_tracker.clone(),
             )
                 .await?
         } else {
@@ -114,6 +122,7 @@ where
             command_tx,
             _node_liveliness_token: node_liveliness_token,
             game_state: None,
+            stats_tracker,
         };
 
         Ok(node)
@@ -161,6 +170,7 @@ where
                         &self.command_rx,
                         self.engine.clone(),
                         self.game_state.clone(),
+                        self.stats_tracker.clone(),
                     )
                     .await?
             }
@@ -203,6 +213,22 @@ where
     /// Get the current game state if available
     pub fn game_state(&self) -> Option<S> {
         self.game_state.clone()
+    }
+
+    /// Get current node statistics
+    ///
+    /// Returns a snapshot of the current throughput statistics including:
+    /// - Total input/output bytes
+    /// - Input/output throughput in KB/s
+    pub fn stats(&self) -> NodeStats {
+        self.stats_tracker.get_stats()
+    }
+
+    /// Reset node statistics
+    ///
+    /// Resets all byte counters to zero and restarts the timer for throughput calculation
+    pub fn reset_stats(&self) {
+        self.stats_tracker.reset();
     }
 }
 

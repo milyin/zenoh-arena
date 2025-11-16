@@ -37,6 +37,7 @@ where
         command_rx: &flume::Receiver<NodeCommand<A>>,
         engine: Arc<dyn GameEngine<Action = A, State = S>>,
         game_state: Option<S>,
+        stats_tracker: Arc<crate::node::stats::StatsTracker>,
     ) -> Result<(NodeStateInternal<A, S>, StepResult<S>)> {
         tracing::info!("Node '{}' searching for hosts...", node_id);
 
@@ -122,6 +123,7 @@ where
                 config.keyexpr_prefix.clone(),
                 host_id,
                 node_id.clone(),
+                stats_tracker.clone(),
             )
             .await?;
             Ok((
@@ -136,6 +138,7 @@ where
                 config.keyexpr_prefix.clone(),
                 node_id,
                 game_state,
+                stats_tracker,
             )
             .await?;
             Ok((

@@ -2,7 +2,9 @@
 
 use crate::error::Result;
 use crate::network::keyexpr::{KeyexprLink, LinkType};
+use crate::node::stats::StatsTracker;
 use crate::node::types::NodeId;
+use std::sync::Arc;
 use zenoh::key_expr::KeyExpr;
 
 /// Subscribes to a Zenoh key expression and deserializes received data
@@ -13,6 +15,7 @@ use zenoh::key_expr::KeyExpr;
 /// The `recv()` method returns both the sender ID and the deserialized value.
 pub struct NodeSubscriber<T> {
     subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
+    stats_tracker: Option<Arc<StatsTracker>>,
     _phantom: std::marker::PhantomData<T>,
 }
 
@@ -39,6 +42,7 @@ where
         prefix: impl Into<KeyExpr<'static>>,
         link_type: LinkType,
         receiver_node_id: &NodeId,
+        stats_tracker: Option<Arc<StatsTracker>>,
     ) -> Result<Self> {
         // Construct Link keyexpr: <prefix>/<link_type>/*/<receiver_id> (sender_id=*, receiver_id)
         let node_keyexpr = KeyexprLink::new(prefix, link_type, None, Some(receiver_node_id.clone()));
@@ -51,6 +55,7 @@ where
 
         Ok(Self {
             subscriber,
+            stats_tracker,
             _phantom: std::marker::PhantomData,
         })
     }
@@ -69,6 +74,11 @@ where
             .recv_async()
             .await
             .map_err(|e| crate::error::ArenaError::Internal(format!("Failed to receive sample: {}", e)))?;
+
+        // Track input bytes if stats tracker is available
+        if let Some(tracker) = &self.stats_tracker {
+            tracker.add_input_bytes(sample.payload().len());
+        }
 
         // Parse the keyexpr to extract sender_id (node_src)
         let keyexpr_link = KeyexprLink::try_from(sample.key_expr().clone().into_owned())?;

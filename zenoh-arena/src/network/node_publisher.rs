@@ -2,7 +2,9 @@
 
 use crate::error::Result;
 use crate::network::keyexpr::{KeyexprLink, LinkType};
+use crate::node::stats::StatsTracker;
 use crate::node::types::NodeId;
+use std::sync::Arc;
 use zenoh::key_expr::KeyExpr;
 
 /// Publishes to a Zenoh key expression with automatic serialization
@@ -12,6 +14,7 @@ use zenoh::key_expr::KeyExpr;
 /// Use `put()` to publish a serialized value.
 pub struct NodePublisher<T> {
     publisher: zenoh::pubsub::Publisher<'static>,
+    stats_tracker: Option<Arc<StatsTracker>>,
     _phantom: std::marker::PhantomData<T>,
 }
 
@@ -41,6 +44,7 @@ where
         link_type: LinkType,
         sender_id: &NodeId,
         receiver_id: Option<&NodeId>,
+        stats_tracker: Option<Arc<StatsTracker>>,
     ) -> Result<Self> {
         // Construct Link keyexpr with optional receiver (None = wildcard)
         let node_keyexpr = KeyexprLink::new(
@@ -58,6 +62,7 @@ where
 
         Ok(Self {
             publisher,
+            stats_tracker,
             _phantom: std::marker::PhantomData,
         })
     }
@@ -68,6 +73,11 @@ where
     /// Returns an error if serialization or publishing fails.
     pub async fn put(&self, value: &T) -> Result<()> {
         let payload = zenoh_ext::z_serialize(value);
+
+        // Track output bytes if stats tracker is available
+        if let Some(tracker) = &self.stats_tracker {
+            tracker.add_output_bytes(payload.len());
+        }
 
         self.publisher
             .put(payload)

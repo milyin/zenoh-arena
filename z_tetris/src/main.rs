@@ -131,7 +131,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     game_state.swap();
                 }
 
-                let message = format_node_state_message(&state);
+                let mut message = format_node_state_message(&state);
+                // Add throughput statistics
+                let stats = node.stats();
+                message.push(String::new());
+                message.push(format!(
+                    "↑ {:.1} Kb/s ↓ {:.1} Kb/s",
+                    stats.output_kbps,
+                    stats.input_kbps
+                ));
+
                 render_game(&render_term, &game_state, message)?;
 
                 // Check if player's game is over

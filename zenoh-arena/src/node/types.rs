@@ -11,6 +11,7 @@ use crate::node::game_engine::GameEngine;
 use crate::node::host_state::HostState;
 use crate::node::name_generator;
 use crate::node::searching_host_state::SearchingHostState;
+use crate::node::stats::StatsTracker;
 
 /// Unique node identifier
 ///
@@ -217,6 +218,7 @@ where
         prefix: impl Into<KeyExpr<'static>>,
         node_id: &NodeId,
         initial_state: Option<S>,
+        stats_tracker: Arc<StatsTracker>,
     ) -> Result<Self> {
         let prefix = prefix.into();
 
@@ -235,7 +237,13 @@ where
         let client_liveliness_watch = NodeLivelinessWatch::new();
 
         // Create action subscriber to receive actions from clients
-        let action_subscriber = NodeSubscriber::new(session, prefix.clone(), LinkType::Action, node_id).await?;
+        let action_subscriber = NodeSubscriber::new(
+            session,
+            prefix.clone(),
+            LinkType::Action,
+            node_id,
+            Some(stats_tracker.clone()),
+        ).await?;
 
         // Create state publisher to send game state to all clients (using wildcard for receiver)
         let state_publisher = NodePublisher::new(
@@ -244,6 +252,7 @@ where
             LinkType::State,
             node_id,
             None, // Broadcast to all clients
+            Some(stats_tracker),
         ).await?;
 
         Ok(NodeStateInternal::Host(HostState {
@@ -265,6 +274,7 @@ where
         prefix: impl Into<KeyExpr<'static>>,
         host_id: NodeId,
         client_id: NodeId,
+        stats_tracker: Arc<StatsTracker>,
     ) -> Result<Self> {
         let prefix = prefix.into();
 
@@ -285,6 +295,7 @@ where
             LinkType::Action,
             &client_id,
             Some(&host_id),
+            Some(stats_tracker.clone()),
         ).await?;
 
         // Create subscriber for receiving game state from the host
@@ -293,6 +304,7 @@ where
             prefix,
             LinkType::State,
             &client_id,
+            Some(stats_tracker),
         ).await?;
 
         Ok(NodeStateInternal::Client(ClientState {
